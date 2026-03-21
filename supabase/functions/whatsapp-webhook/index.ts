@@ -278,6 +278,54 @@ function validateWebhookSubscription(
   return textResponse(challenge, 200);
 }
 
+async function sendWhatsAppReply(
+  phone: string,
+  replyText: string,
+  config: WhatsAppConfig,
+): Promise<void> {
+  const { accessToken, phoneNumberId } = config;
+
+  if (!accessToken || !phoneNumberId) {
+    console.warn("Missing WhatsApp config");
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: phone,
+          type: "text",
+          text: {
+            body: replyText,
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const responseBody = await response.text();
+      console.error("[whatsapp-webhook] Failed to send WhatsApp reply", {
+        phone,
+        status: response.status,
+        body: responseBody,
+      });
+    }
+  } catch (error) {
+    console.error("[whatsapp-webhook] Error sending WhatsApp reply", {
+      phone,
+      error,
+    });
+  }
+}
+
 async function handleInboundEvent(
   req: Request,
   config: WhatsAppConfig,
@@ -372,6 +420,7 @@ async function handleInboundEvent(
     conversation_id: string;
     campaign_id: string | null;
     campaign_flow_restarted: boolean;
+    phone: string;
     reply_text: string;
     route: string;
     detected_intents: string[];
@@ -441,6 +490,7 @@ async function handleInboundEvent(
         conversation_id: persistenceResult.conversation.id,
         campaign_id: campaignResponseResult.campaign_id,
         campaign_flow_restarted: campaignResponseResult.flow_restarted,
+        phone: message.phone,
         reply_text: routerResult.reply_text,
         route: routerResult.route,
         detected_intents: routerResult.detected_intents,
@@ -452,6 +502,14 @@ async function handleInboundEvent(
         error,
       });
     }
+  }
+
+  for (const routerReply of routerReplies) {
+    await sendWhatsAppReply(
+      routerReply.phone,
+      routerReply.reply_text,
+      config,
+    );
   }
 
   return jsonResponse({

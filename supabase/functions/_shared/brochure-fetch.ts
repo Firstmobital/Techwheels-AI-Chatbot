@@ -89,7 +89,7 @@ async function loadActiveBrochureMetadata(
 async function fetchBrochureFileAsText(
   storagePath: string,
 ): Promise<string | null> {
-  const bucketName = Deno.env.get("SUPABASE_STORAGE_BUCKET") ?? "";
+  const bucketName = Deno.env.get("BROCHURE_BUCKET") ?? "";
 
   if (!bucketName) {
     console.warn("[brochure-fetch] Missing SUPABASE_STORAGE_BUCKET");

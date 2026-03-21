@@ -152,7 +152,7 @@ export async function handleLeadCaptureStep(
   if (effectiveStep === "ask_model") {
     const supportedModels = await getSupportedModels();
     const selectedModel = normalizeSupportedModel(
-      incomingText,
+      incomingText ?? "",
       supportedModels,
     );
 
@@ -411,18 +411,21 @@ function normalizeChoice(
   return null;
 }
 
-function normalizeSupportedModel(
-  value: string | null,
+export function normalizeSupportedModel(
+  input: string,
   supportedModels: string[],
 ): string | null {
-  if (!value) {
-    return null;
-  }
+  if (!input) return null;
 
-  const normalizedInput = value.trim().toLowerCase();
+  const normalizedInput = input.toLowerCase().trim();
 
   for (const model of supportedModels) {
-    if (model.toLowerCase() === normalizedInput) {
+    const normalizedModel = model.toLowerCase();
+
+    if (
+      normalizedModel.includes(normalizedInput) ||
+      normalizedInput.includes(normalizedModel)
+    ) {
       return model;
     }
   }

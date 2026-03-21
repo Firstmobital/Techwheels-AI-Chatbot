@@ -1,6 +1,7 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import type { PropsWithChildren } from "react";
 import clsx from "clsx";
+import { supabase } from "../../lib/supabase";
 
 const navItems = [
   { to: "/leads", label: "Leads" },
@@ -9,6 +10,19 @@ const navItems = [
 ];
 
 export function AppLayout({ children }: PropsWithChildren) {
+  const navigate = useNavigate();
+
+  async function handleLogout() {
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      console.error("[dashboard-auth] Failed to sign out", error);
+      return;
+    }
+
+    navigate("/login");
+  }
+
   return (
     <div className="min-h-screen bg-paper text-ink">
       <div className="mx-auto grid min-h-screen max-w-[1440px] grid-cols-1 lg:grid-cols-[260px_1fr]">
@@ -40,6 +54,14 @@ export function AppLayout({ children }: PropsWithChildren) {
               </NavLink>
             ))}
           </nav>
+
+          <button
+            className="mt-8 w-full rounded-xl border border-white/20 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/10"
+            onClick={() => void handleLogout()}
+            type="button"
+          >
+            Logout
+          </button>
         </aside>
 
         <main className="px-4 py-6 sm:px-6 lg:px-8">{children}</main>
