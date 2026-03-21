@@ -24,6 +24,7 @@ type RouterContext = {
     id: string;
     phone: string;
     lead_id: string | null;
+    campaign_id: string | null;
     current_state: string;
     current_step: string | null;
   };
@@ -39,14 +40,42 @@ type RouterContext = {
   } | null;
 };
 
-type RouteName = "lead_capture" | "pricing" | "features" | "fallback";
-type IntentName = "lead_capture" | "pricing" | "features" | "fallback";
+export type IntentName =
+  | "greeting"
+  | "lead_capture"
+  | "pricing"
+  | "features"
+  | "comparison"
+  | "fallback";
+
+type RouteName =
+  | "lead_capture"
+  | "pricing"
+  | "features"
+  | "comparison"
+  | "fallback"
+  | "multi_intent";
 
 export type RouterResult = {
   route: RouteName;
-  detected_intent: IntentName;
+  detected_intents: IntentName[];
   reply_text: string;
 };
+
+type ReplySection = {
+  title: string;
+  body: string;
+};
+
+const GREETING_KEYWORDS = [
+  "hi",
+  "hello",
+  "hey",
+  "good morning",
+  "good afternoon",
+  "good evening",
+  "namaste",
+];
 
 const PRICING_KEYWORDS = [
   "price",
@@ -58,6 +87,8 @@ const PRICING_KEYWORDS = [
   "discount",
   "scheme",
   "offer",
+  "kitna",
+  "rate",
 ];
 
 const FEATURE_KEYWORDS = [
@@ -67,17 +98,26 @@ const FEATURE_KEYWORDS = [
   "specs",
   "specification",
   "specifications",
-  "compare",
-  "comparison",
   "sunroof",
+  "mileage",
+  "range",
+  "adas",
   "safety",
   "airbag",
   "airbags",
-  "mileage",
   "engine",
   "ground clearance",
   "boot",
   "seat",
+];
+
+const COMPARISON_KEYWORDS = [
+  "compare",
+  "comparison",
+  "vs",
+  "versus",
+  "better than",
+  "difference",
 ];
 
 export async function routeInboundMessage(
@@ -85,32 +125,154 @@ export async function routeInboundMessage(
   inboundMessage: NormalizedMessage,
 ): Promise<RouterResult> {
   const context = await loadRouterContext(conversationId);
-  const detectedIntent = detectIntent(inboundMessage.content);
-
-  let route: RouteName = "fallback";
-  let replyText = "";
 
   if (isLeadCaptureIncomplete(context.conversation)) {
-    route = "lead_capture";
     const leadCaptureContext = await loadLeadCaptureContext(conversationId);
     const leadCaptureResult: LeadCaptureResult = await handleLeadCaptureStep(
       inboundMessage.content,
       leadCaptureContext,
     );
-    replyText = leadCaptureResult.replyText;
-  } else if (detectedIntent === "pricing") {
-    route = "pricing";
-    replyText = await handlePricingRoute(context, inboundMessage.content);
-  } else if (detectedIntent === "features") {
-    route = "features";
-    replyText = await handleFeaturesRoute(context, inboundMessage.content);
-  } else {
-    route = "fallback";
-    replyText = buildFallbackReply(context);
+
+    await persistRouterReply(
+      conversationId,
+      context.conversation.phone,
+      leadCaptureResult.replyText,
+      "lead_capture",
+      ["lead_capture"],
+    );
+
+    return {
+      route: "lead_capture",
+      detected_intents: ["lead_capture"],
+      reply_text: leadCaptureResult.replyText,
+    };
   }
 
+  const detectedIntents = detectIntents(inboundMessage.content);
+  const actionableIntents = detectedIntents.filter((intent) =>
+    intent === "pricing" || intent === "features" || intent === "comparison"
+  );
+  const isCampaignContinuation = Boolean(context.conversation.campaign_id) &&
+    isCampaignEngagementMessage(inboundMessage);
+
+  if (isCampaignContinuation && !actionableIntents.includes("pricing")) {
+    actionableIntents.push("pricing");
+  }
+  const effectiveDetectedIntents = [
+    ...new Set([
+      ...detectedIntents,
+      ...(isCampaignContinuation ? ["pricing" as const] : []),
+    ]),
+  ];
+
+  let route: RouteName;
+  let replyText: string;
+
+  if (actionableIntents.length === 0) {
+    route = "fallback";
+    replyText = buildFallbackReply(context);
+  } else {
+    const sections: ReplySection[] = [];
+
+    if (actionableIntents.includes("pricing")) {
+      const pricingBody = await handlePricingRoute(
+        context,
+        inboundMessage.content,
+      );
+      sections.push({
+        title: "Price",
+        body: pricingBody,
+      });
+    }
+
+    if (
+      actionableIntents.includes("features") ||
+      actionableIntents.includes("comparison")
+    ) {
+      const featuresBody = await handleFeaturesRoute(
+        context,
+        inboundMessage.content,
+      );
+      sections.push({
+        title: actionableIntents.includes("comparison")
+          ? "Comparison / Features"
+          : "Features",
+        body: featuresBody,
+      });
+    }
+
+    route = actionableIntents.length > 1
+      ? "multi_intent"
+      : actionableIntents[0] === "comparison"
+      ? "comparison"
+      : actionableIntents[0];
+    replyText = formatCombinedReply(
+      sections,
+      effectiveDetectedIntents.includes("greeting"),
+    );
+  }
+
+  await persistRouterReply(
+    conversationId,
+    context.conversation.phone,
+    replyText,
+    route,
+    effectiveDetectedIntents.length > 0
+      ? effectiveDetectedIntents
+      : ["fallback"],
+  );
+
+  return {
+    route,
+    detected_intents: effectiveDetectedIntents.length > 0
+      ? effectiveDetectedIntents
+      : ["fallback"],
+    reply_text: replyText,
+  };
+}
+
+export function detectIntents(messageText: string | null): IntentName[] {
+  const normalizedText = normalizeText(messageText);
+
+  if (!normalizedText) {
+    return ["fallback"];
+  }
+
+  const intents = new Set<IntentName>();
+
+  if (GREETING_KEYWORDS.some((keyword) => normalizedText.includes(keyword))) {
+    intents.add("greeting");
+  }
+
+  if (PRICING_KEYWORDS.some((keyword) => normalizedText.includes(keyword))) {
+    intents.add("pricing");
+  }
+
+  if (FEATURE_KEYWORDS.some((keyword) => normalizedText.includes(keyword))) {
+    intents.add("features");
+  }
+
+  if (COMPARISON_KEYWORDS.some((keyword) => normalizedText.includes(keyword))) {
+    intents.add("comparison");
+    intents.add("features");
+  }
+
+  if (intents.size === 0) {
+    intents.add("fallback");
+  }
+
+  return [...intents];
+}
+
+async function persistRouterReply(
+  conversationId: string,
+  phone: string,
+  replyText: string,
+  route: RouteName,
+  detectedIntents: IntentName[],
+): Promise<void> {
   await insertOutboundMessage(conversationId, {
-    phone: context.conversation.phone,
+    phone,
     whatsapp_message_id: null,
     message_type: "text",
     content: replyText,
@@ -118,34 +280,10 @@ export async function routeInboundMessage(
     raw_payload: {
       source: "message_router",
       route,
-      detected_intent: detectedIntent,
+      detected_intents: detectedIntents,
       conversation_id: conversationId,
     },
   });
-
-  return {
-    route,
-    detected_intent: route === "lead_capture" ? "lead_capture" : detectedIntent,
-    reply_text: replyText,
-  };
-}
-
-export function detectIntent(messageText: string | null): IntentName {
-  const normalizedText = (messageText ?? "").trim().toLowerCase();
-
-  if (!normalizedText) {
-    return "fallback";
-  }
-
-  if (PRICING_KEYWORDS.some((keyword) => normalizedText.includes(keyword))) {
-    return "pricing";
-  }
-
-  if (FEATURE_KEYWORDS.some((keyword) => normalizedText.includes(keyword))) {
-    return "features";
-  }
-
-  return "fallback";
 }
 
 async function loadRouterContext(
@@ -155,7 +293,7 @@ async function loadRouterContext(
 
   const { data: conversation, error: conversationError } = await supabase
     .from("conversations")
-    .select("id, phone, lead_id, current_state, current_step")
+    .select("id, phone, lead_id, campaign_id, current_state, current_step")
     .eq("id", conversationId)
     .single();
 
@@ -211,7 +349,7 @@ async function handlePricingRoute(
   inboundText: string | null,
 ): Promise<string> {
   if (!context.lead?.interested_model) {
-    return "I can help with pricing. First, please tell me which model you are interested in.";
+    return "I can help with price. First, please tell me which model you are interested in.";
   }
 
   const matchingVariants = await getMatchingVariants({
@@ -274,7 +412,28 @@ function buildFallbackReply(context: RouterContext): string {
     ? ` for ${context.lead.interested_model}`
     : "";
 
-  return `I can help with pricing${modelReference}, features and specifications, or connect you with a human advisor. Just tell me what you need.`;
+  return `I can help with price${modelReference}, features, or the best variant. Do you want price, features, or best variant? I can also connect you with a human advisor.`;
+}
+
+function formatCombinedReply(
+  sections: ReplySection[],
+  includeGreeting: boolean,
+): string {
+  const uniqueSections = sections.filter((section, index) =>
+    sections.findIndex((candidate) => candidate.body === section.body) === index
+  );
+
+  const parts: string[] = [];
+
+  if (includeGreeting) {
+    parts.push("Sure, here are the details:");
+  }
+
+  for (const section of uniqueSections) {
+    parts.push(`${section.title}:\n${section.body}`);
+  }
+
+  return parts.join("\n\n").trim();
 }
 
 function resolveVariantForPricing(
@@ -285,7 +444,7 @@ function resolveVariantForPricing(
     return variants[0];
   }
 
-  const normalizedText = (inboundText ?? "").trim().toLowerCase();
+  const normalizedText = normalizeText(inboundText);
 
   if (!normalizedText) {
     return null;
@@ -319,4 +478,21 @@ function extractVariantNameForFeatures(
   }
 
   return null;
+}
+
+function normalizeText(value: string | null): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function isCampaignEngagementMessage(message: NormalizedMessage): boolean {
+  if (
+    message.message_type === "button" || message.message_type === "interactive"
+  ) {
+    return true;
+  }
+
+  const normalizedText = normalizeText(message.content);
+  return normalizedText === "yes" ||
+    normalizedText === "interested" ||
+    normalizedText === "i am interested";
 }

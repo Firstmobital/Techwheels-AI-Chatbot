@@ -1,10 +1,10 @@
 import { getSupabaseAdminClient } from "./supabase-admin.ts";
+import { fetchBrochureContext } from "./brochure-fetch.ts";
 
 export type AIAnswerRequest = {
   question: string;
   model_name: string;
   variant_name?: string | null;
-  brochure_content?: string | null;
 };
 
 type BrochureMetadata = {
@@ -60,14 +60,17 @@ const SAFE_FALLBACK_RESPONSE: AIAnswerResponse = {
 export async function answerBrochureQuestion(
   request: AIAnswerRequest,
 ): Promise<AIAnswerResponse> {
-  const brochure = await loadActiveBrochureMetadata(request.model_name);
   const variant = request.variant_name
     ? await loadVariantMetadata(request.model_name, request.variant_name)
     : null;
+  const brochureContext = await fetchBrochureContext({
+    model_name: request.model_name,
+    fuel_type: variant?.fuel_type ?? null,
+  });
 
   const contextPayload = buildBrochureContextPayload(
     request,
-    brochure,
+    brochureContext,
     variant,
   );
 
@@ -75,8 +78,8 @@ export async function answerBrochureQuestion(
     console.warn("[ai-answer] Insufficient brochure context for AI response", {
       modelName: request.model_name,
       variantName: request.variant_name ?? null,
-      brochureId: brochure?.id ?? null,
-      hasBrochureContent: Boolean(request.brochure_content),
+      brochureId: brochureContext.brochure?.id ?? null,
+      hasBrochureContent: Boolean(brochureContext.brochure_content),
     });
     return SAFE_FALLBACK_RESPONSE;
   }
@@ -168,33 +171,6 @@ export function getAISystemPrompt(): string {
   return AI_SYSTEM_PROMPT;
 }
 
-async function loadActiveBrochureMetadata(
-  modelName: string,
-): Promise<BrochureMetadata | null> {
-  const supabase = getSupabaseAdminClient();
-
-  const { data, error } = await supabase
-    .from("brochures")
-    .select(
-      "id, model, file_name, storage_path, public_url, version, created_at",
-    )
-    .eq("model", modelName)
-    .eq("is_active", true)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    console.error("[ai-answer] Failed to load active brochure metadata", {
-      modelName,
-      error,
-    });
-    throw new Error("Failed to load brochure metadata");
-  }
-
-  return data;
-}
-
 async function loadVariantMetadata(
   modelName: string,
   variantName: string,
@@ -224,34 +200,42 @@ async function loadVariantMetadata(
 
 function buildBrochureContextPayload(
   request: AIAnswerRequest,
-  brochure: BrochureMetadata | null,
+  brochureContext: {
+    brochure: BrochureMetadata | null;
+    brochure_content: string | null;
+    extraction_supported: boolean;
+  },
   variant: VariantMetadata | null,
 ): {
   hasUsableContext: boolean;
   context: Record<string, unknown>;
 } {
-  const brochureContent = request.brochure_content?.trim() ?? "";
+  const brochureContent = brochureContext.brochure_content?.trim() ?? "";
 
   return {
     hasUsableContext: brochureContent.length > 0,
     context: {
       model_name: request.model_name,
       variant_name: request.variant_name ?? null,
-      brochure_metadata: brochure
+      brochure_metadata: brochureContext.brochure
         ? {
-          id: brochure.id,
-          file_name: brochure.file_name,
-          storage_path: brochure.storage_path,
-          public_url: brochure.public_url,
-          version: brochure.version,
-          created_at: brochure.created_at,
+          id: brochureContext.brochure.id,
+          file_name: brochureContext.brochure.file_name,
+          storage_path: brochureContext.brochure.storage_path,
+          public_url: brochureContext.brochure.public_url,
+          version: brochureContext.brochure.version,
+          created_at: brochureContext.brochure.created_at,
         }
         : null,
       variant_metadata: variant,
       brochure_content: brochureContent || null,
       context_limitations: brochureContent.length > 0 ? [] : [
-        "Brochure text extraction is not available yet.",
-        "Only metadata is available, so specification answers may not be confirmed.",
+        brochureContext.brochure
+          ? brochureContext.extraction_supported
+            ? "Brochure text was empty after fetch."
+            : "Phase 1 text extraction supports only text-readable brochure files from Storage."
+          : "No active brochure was found for the selected model.",
+        "Only confirmed brochure context should be used for specification answers.",
       ],
     },
   };

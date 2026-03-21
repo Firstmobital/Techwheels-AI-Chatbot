@@ -59,7 +59,7 @@ serve(async (req) => {
     console.info("[ai-answer] AI brochure question received", {
       modelName: requestBody.model_name,
       variantName: requestBody.variant_name ?? null,
-      hasBrochureContent: Boolean(requestBody.brochure_content),
+      brochureFetchMode: "automatic",
     });
 
     const result = await answerBrochureQuestion(requestBody);

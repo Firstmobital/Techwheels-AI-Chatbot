@@ -4,6 +4,10 @@ import {
   persistInboundMessage,
 } from "../_shared/conversation-manager.ts";
 import {
+  type CampaignResponseContext,
+  handleCampaignResponseTransition,
+} from "../_shared/campaign-response.ts";
+import {
   routeInboundMessage,
   type RouterResult,
 } from "../_shared/message-router.ts";
@@ -366,9 +370,11 @@ async function handleInboundEvent(
   const persistenceResults: PersistedInboundMessageResult[] = [];
   const routerReplies: Array<{
     conversation_id: string;
+    campaign_id: string | null;
+    campaign_flow_restarted: boolean;
     reply_text: string;
     route: string;
-    detected_intent: string;
+    detected_intents: string[];
   }> = [];
 
   for (const message of normalizedMessages) {
@@ -401,6 +407,31 @@ async function handleInboundEvent(
         continue;
       }
 
+      const campaignResponseResult: CampaignResponseContext =
+        await handleCampaignResponseTransition({
+          conversationId: persistenceResult.conversation.id,
+          phone: message.phone,
+          messageType: message.message_type,
+          content: message.content,
+          lead: null,
+        }).catch(async (error) => {
+          console.error(
+            "[whatsapp-webhook] Failed to process campaign response",
+            {
+              phone: message.phone,
+              conversationId: persistenceResult.conversation.id,
+              error,
+            },
+          );
+          return {
+            campaign_id: null,
+            is_campaign_message: false,
+            flow_restarted: false,
+            next_state: null,
+            next_step: null,
+          };
+        });
+
       const routerResult: RouterResult = await routeInboundMessage(
         persistenceResult.conversation.id,
         message,
@@ -408,9 +439,11 @@ async function handleInboundEvent(
 
       routerReplies.push({
         conversation_id: persistenceResult.conversation.id,
+        campaign_id: campaignResponseResult.campaign_id,
+        campaign_flow_restarted: campaignResponseResult.flow_restarted,
         reply_text: routerResult.reply_text,
         route: routerResult.route,
-        detected_intent: routerResult.detected_intent,
+        detected_intents: routerResult.detected_intents,
       });
     } catch (error) {
       console.error("[whatsapp-webhook] Failed to persist inbound message", {

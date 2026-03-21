@@ -2,6 +2,7 @@ import {
   findOrCreateConversationByPhone,
   findOrCreateLeadPlaceholderByPhone,
   insertOutboundMessage,
+  updateConversationCampaign,
   updateConversationLastMessageAt,
 } from "./conversation-manager.ts";
 import { getSupabaseAdminClient } from "./supabase-admin.ts";
@@ -366,6 +367,7 @@ async function persistCampaignOutboundMessage(
     recipient.phone,
     lead.id,
   );
+  await updateConversationCampaign(conversation.id, campaign.id);
 
   const messageText =
     `Campaign: ${campaign.name}\nTemplate: ${template.template_name}`;

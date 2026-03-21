@@ -19,6 +19,7 @@ type ConversationRecord = {
   id: string;
   phone: string;
   lead_id: string | null;
+  campaign_id?: string | null;
 };
 
 type MessageRecord = {
@@ -123,7 +124,7 @@ export async function findOrCreateConversationByPhone(
   const { data: existingConversation, error: existingConversationError } =
     await supabase
       .from("conversations")
-      .select("id, phone, lead_id")
+      .select("id, phone, lead_id, campaign_id")
       .eq("phone", phone)
       .maybeSingle();
 
@@ -145,7 +146,7 @@ export async function findOrCreateConversationByPhone(
           .from("conversations")
           .update({ lead_id: leadId })
           .eq("id", existingConversation.id)
-          .select("id, phone, lead_id")
+          .select("id, phone, lead_id, campaign_id")
           .single();
 
       if (linkConversationError) {
@@ -176,7 +177,7 @@ export async function findOrCreateConversationByPhone(
         current_state: "new",
         is_open: true,
       })
-      .select("id, phone, lead_id")
+      .select("id, phone, lead_id, campaign_id")
       .single();
 
   if (
@@ -202,7 +203,7 @@ export async function findOrCreateConversationByPhone(
   const { data: duplicateConversation, error: duplicateConversationError } =
     await supabase
       .from("conversations")
-      .select("id, phone, lead_id")
+      .select("id, phone, lead_id, campaign_id")
       .eq("phone", phone)
       .single();
 
@@ -223,7 +224,7 @@ export async function findOrCreateConversationByPhone(
         .from("conversations")
         .update({ lead_id: leadId })
         .eq("id", duplicateConversation.id)
-        .select("id, phone, lead_id")
+        .select("id, phone, lead_id, campaign_id")
         .single();
 
     if (linkDuplicateError || !linkedDuplicateConversation) {
@@ -294,6 +295,55 @@ export async function updateConversationLastMessageAt(
       },
     );
     throw new Error("Failed to update conversation timestamp");
+  }
+}
+
+export async function updateConversationCampaign(
+  conversationId: string,
+  campaignId: string | null,
+): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+
+  const { error } = await supabase
+    .from("conversations")
+    .update({ campaign_id: campaignId })
+    .eq("id", conversationId);
+
+  if (error) {
+    console.error(
+      "[conversation-manager] Failed to update conversation campaign",
+      {
+        conversationId,
+        campaignId,
+        error,
+      },
+    );
+    throw new Error("Failed to update conversation campaign");
+  }
+}
+
+export async function updateConversationFlow(
+  conversationId: string,
+  values: {
+    current_state?: string;
+    current_step?: string | null;
+    campaign_id?: string | null;
+  },
+): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+
+  const { error } = await supabase
+    .from("conversations")
+    .update(values)
+    .eq("id", conversationId);
+
+  if (error) {
+    console.error("[conversation-manager] Failed to update conversation flow", {
+      conversationId,
+      values,
+      error,
+    });
+    throw new Error("Failed to update conversation flow");
   }
 }
 
