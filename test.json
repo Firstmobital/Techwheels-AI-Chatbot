@@ -1,0 +1,18 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [{
+    "changes": [{
+      "value": {
+        "messages": [{
+          "from": "919876543210",
+          "id": "wamid.prod123",
+          "timestamp": "1711027440",
+          "type": "text",
+          "text": {
+            "body": "Hi, I want Nexon price"
+          }
+        }]
+      }
+    }]
+  }]
+}
