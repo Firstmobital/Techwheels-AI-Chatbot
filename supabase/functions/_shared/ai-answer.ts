@@ -5,16 +5,7 @@ export type AIAnswerRequest = {
   question: string;
   model_name: string;
   variant_name?: string | null;
-};
-
-type BrochureMetadata = {
-  id: string;
-  model: string;
-  file_name: string;
-  storage_path: string;
-  public_url: string | null;
-  version: string | null;
-  created_at: string;
+  brochure_url?: string | null;
 };
 
 type VariantMetadata = {
@@ -23,6 +14,7 @@ type VariantMetadata = {
   variant_name: string;
   fuel_type: string;
   transmission: string;
+  brochure_url: string | null;
 };
 
 export type AIAnswerResponse = {
@@ -66,6 +58,7 @@ export async function answerBrochureQuestion(
   const brochureContext = await fetchBrochureContext({
     model_name: request.model_name,
     fuel_type: variant?.fuel_type ?? null,
+    variant_brochure_url: request.brochure_url ?? variant?.brochure_url ?? null,
   });
 
   const contextPayload = buildBrochureContextPayload(
@@ -78,8 +71,8 @@ export async function answerBrochureQuestion(
     console.warn("[ai-answer] Insufficient brochure context for AI response", {
       modelName: request.model_name,
       variantName: request.variant_name ?? null,
-      brochureId: brochureContext.brochure?.id ?? null,
-      hasBrochureContent: Boolean(brochureContext.brochure_content),
+      brochureUrl: brochureContext.brochure_url,
+      hasBrochurePdf: Boolean(brochureContext.brochure_base64),
     });
     return SAFE_FALLBACK_RESPONSE;
   }
@@ -113,6 +106,14 @@ export async function answerBrochureQuestion(
                   context: contextPayload.context,
                 }),
               },
+              ...(brochureContext.brochure_base64
+                ? [{
+                  inline_data: {
+                    mime_type: "application/pdf",
+                    data: brochureContext.brochure_base64,
+                  },
+                }]
+                : []),
             ],
           },
         ],
@@ -179,7 +180,7 @@ async function loadVariantMetadata(
 
   const { data, error } = await supabase
     .from("variants")
-    .select("id, model, variant_name, fuel_type, transmission")
+    .select("id, model, variant_name, fuel_type, transmission, brochure_url")
     .eq("model", modelName)
     .eq("variant_name", variantName)
     .eq("is_active", true)
@@ -201,40 +202,27 @@ async function loadVariantMetadata(
 function buildBrochureContextPayload(
   request: AIAnswerRequest,
   brochureContext: {
-    brochure: BrochureMetadata | null;
-    brochure_content: string | null;
-    extraction_supported: boolean;
+    brochure_url: string | null;
+    brochure_base64: string | null;
+    mime_type: "application/pdf" | null;
   },
   variant: VariantMetadata | null,
 ): {
   hasUsableContext: boolean;
   context: Record<string, unknown>;
 } {
-  const brochureContent = brochureContext.brochure_content?.trim() ?? "";
-
   return {
-    hasUsableContext: brochureContent.length > 0,
+    hasUsableContext: Boolean(brochureContext.brochure_base64),
     context: {
       model_name: request.model_name,
       variant_name: request.variant_name ?? null,
-      brochure_metadata: brochureContext.brochure
-        ? {
-          id: brochureContext.brochure.id,
-          file_name: brochureContext.brochure.file_name,
-          storage_path: brochureContext.brochure.storage_path,
-          public_url: brochureContext.brochure.public_url,
-          version: brochureContext.brochure.version,
-          created_at: brochureContext.brochure.created_at,
-        }
-        : null,
+      brochure_url: brochureContext.brochure_url,
+      brochure_mime_type: brochureContext.mime_type,
       variant_metadata: variant,
-      brochure_content: brochureContent || null,
-      context_limitations: brochureContent.length > 0 ? [] : [
-        brochureContext.brochure
-          ? brochureContext.extraction_supported
-            ? "Brochure text was empty after fetch."
-            : "Phase 1 text extraction supports only text-readable brochure files from Storage."
-          : "No active brochure was found for the selected model.",
+      context_limitations: brochureContext.brochure_base64 ? [] : [
+        brochureContext.brochure_url
+          ? "Brochure PDF could not be fetched as inline context."
+          : "No brochure URL was found for the selected model and fuel type.",
         "Only confirmed brochure context should be used for specification answers.",
       ],
     },

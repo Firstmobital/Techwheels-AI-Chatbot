@@ -51,7 +51,8 @@ serve(async (req) => {
     console.info("[pricing-engine] Pricing request received", {
       variantId: requestBody.variant_id,
       exchangeRequired: requestBody.exchange_required,
-      hasPricingContext: Boolean(requestBody.pricing_context),
+      useBhRto: requestBody.use_bh_rto ?? false,
+      useScrapRto: requestBody.use_scrap_rto ?? false,
     });
 
     const breakdown = await calculatePricing(requestBody);
@@ -60,7 +61,7 @@ serve(async (req) => {
     console.info("[pricing-engine] Pricing calculated", {
       variantId: requestBody.variant_id,
       finalOnRoadPrice: breakdown.final_on_road_price,
-      totalDiscounts: breakdown.total_discounts,
+      totalDiscount: breakdown.total_discount,
     });
 
     return jsonResponse({

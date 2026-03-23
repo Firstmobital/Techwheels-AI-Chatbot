@@ -11,6 +11,7 @@ import {
 import {
   calculatePricing,
   formatPricingForWhatsApp,
+  getDefaultPricingRequest,
 } from "./pricing-engine.ts";
 import { getSupabaseAdminClient } from "./supabase-admin.ts";
 import {
@@ -376,13 +377,12 @@ async function handlePricingRoute(
     });
   }
 
-  const breakdown = await calculatePricing({
-    variant_id: selectedVariant.id,
-    exchange_required: context.lead.exchange_required ?? false,
-    pricing_context: {
-      exchange_required: context.lead.exchange_required ?? false,
-    },
-  });
+  const breakdown = await calculatePricing(
+    getDefaultPricingRequest(
+      selectedVariant.id,
+      context.lead.exchange_required ?? false,
+    ),
+  );
 
   return formatPricingForWhatsApp(breakdown);
 }
