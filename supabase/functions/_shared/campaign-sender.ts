@@ -261,6 +261,9 @@ async function sendWhatsAppTemplateMessage(
   };
 }
 
+// Variables must be stored in campaign_recipients.variables as an object with numeric string keys
+// e.g. { "1": "Customer Name", "2": "Model Name", "3": "Savings Amount" }
+// Keys are sorted numerically to match WhatsApp template positions {{1}}, {{2}}, {{3}}
 function buildTemplateComponents(
   variables: Record<string, unknown> | null,
 ): { components?: Array<Record<string, unknown>> } {
@@ -269,13 +272,15 @@ function buildTemplateComponents(
   }
 
   const orderedValues = Object.keys(variables)
-    .sort()
+    .sort((a, b) => {
+      const numA = Number(a);
+      const numB = Number(b);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.localeCompare(b);
+    })
     .map((key) => variables[key])
     .filter((value) => value !== undefined && value !== null)
-    .map((value) => ({
-      type: "text",
-      text: String(value),
-    }));
+    .map((value) => ({ type: "text", text: String(value) }));
 
   if (orderedValues.length === 0) {
     return {};

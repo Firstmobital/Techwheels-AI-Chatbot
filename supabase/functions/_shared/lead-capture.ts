@@ -416,16 +416,39 @@ export function normalizeSupportedModel(
   supportedModels: string[],
 ): string | null {
   if (!input) return null;
-
-  const normalizedInput = input.toLowerCase().trim();
+  const normalizedInput = input.toLowerCase().trim().replace(/\s+/g, " ");
 
   for (const model of supportedModels) {
     const normalizedModel = model.toLowerCase();
-
     if (
       normalizedModel.includes(normalizedInput) ||
       normalizedInput.includes(normalizedModel)
     ) {
+      return model;
+    }
+  }
+
+  const inputTokens = normalizedInput.split(/[\s.\-_]+/).filter((t) =>
+    t.length > 1
+  );
+  for (const model of supportedModels) {
+    const modelTokens = model.toLowerCase().split(/[\s.\-_]+/).filter((t) =>
+      t.length > 1
+    );
+    if (
+      inputTokens.length > 0 &&
+      inputTokens.every((token) =>
+        modelTokens.some((m) => m.startsWith(token) || token.startsWith(m))
+      )
+    ) {
+      return model;
+    }
+  }
+
+  const stripped = normalizedInput.replace(/[\s.\-_]/g, "");
+  for (const model of supportedModels) {
+    const strippedModel = model.toLowerCase().replace(/[\s.\-_]/g, "");
+    if (strippedModel.includes(stripped) || stripped.includes(strippedModel)) {
       return model;
     }
   }

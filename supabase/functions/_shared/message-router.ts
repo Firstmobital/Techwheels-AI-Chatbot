@@ -127,7 +127,7 @@ export async function routeInboundMessage(
 ): Promise<RouterResult> {
   const context = await loadRouterContext(conversationId);
 
-  if (isLeadCaptureIncomplete(context.conversation)) {
+  if (isLeadCaptureIncomplete(context.conversation, context.lead)) {
     const leadCaptureContext = await loadLeadCaptureContext(conversationId);
     const leadCaptureResult: LeadCaptureResult = await handleLeadCaptureStep(
       inboundMessage.content,
@@ -222,6 +222,17 @@ export async function routeInboundMessage(
       ? effectiveDetectedIntents
       : ["fallback"],
   );
+
+  if (context.lead) {
+    await updateLeadScore(
+      context.lead.id,
+      conversationId,
+      effectiveDetectedIntents,
+      route,
+    ).catch(
+      (err) => console.error("[message-router] Failed to update lead score", err),
+    );
+  }
 
   return {
     route,
@@ -338,11 +349,23 @@ async function loadRouterContext(
 
 function isLeadCaptureIncomplete(
   conversation: RouterContext["conversation"],
+  lead: RouterContext["lead"] | null,
 ): boolean {
-  return conversation.current_state === "new" ||
+  if (
+    conversation.current_state === "new" ||
     conversation.current_state === "lead_capture" ||
     (conversation.current_step !== null &&
-      conversation.current_step !== "complete");
+      conversation.current_step !== "complete")
+  ) {
+    return true;
+  }
+
+  if (!lead) return true;
+  if (!lead.interested_model || !lead.fuel_type || !lead.transmission) {
+    return true;
+  }
+
+  return false;
 }
 
 async function handlePricingRoute(
@@ -495,4 +518,50 @@ function isCampaignEngagementMessage(message: NormalizedMessage): boolean {
   return normalizedText === "yes" ||
     normalizedText === "interested" ||
     normalizedText === "i am interested";
+}
+
+async function updateLeadScore(
+  leadId: string,
+  conversationId: string,
+  detectedIntents: IntentName[],
+  route: RouteName,
+): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+
+  const { data: lead, error } = await supabase
+    .from("leads")
+    .select("lead_status")
+    .eq("id", leadId)
+    .single();
+
+  if (error || !lead) return;
+  if (lead.lead_status === "hot") return;
+
+  const { count } = await supabase
+    .from("messages")
+    .select("id", { count: "exact", head: true })
+    .eq("conversation_id", conversationId)
+    .eq("direction", "inbound");
+
+  const messageCount = count ?? 0;
+  const wantsPricing = detectedIntents.includes("pricing") || route === "pricing";
+  const wantsFeatures = detectedIntents.includes("features");
+
+  let newStatus: string | null = null;
+
+  if (wantsPricing && messageCount >= 2) {
+    newStatus = "hot";
+  } else if (wantsPricing || wantsFeatures) {
+    newStatus = "warm";
+  }
+
+  if (!newStatus) return;
+  if (newStatus === "warm" && lead.lead_status === "warm") return;
+
+  await supabase
+    .from("leads")
+    .update({ lead_status: newStatus })
+    .eq("id", leadId);
+
+  console.info("[message-router] Lead score updated", { leadId, newStatus });
 }

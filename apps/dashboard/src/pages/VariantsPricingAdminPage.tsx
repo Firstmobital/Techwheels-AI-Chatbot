@@ -15,6 +15,19 @@ const emptyVariantForm = {
   fuel_type: "",
   transmission: "",
   ex_showroom_price: 0,
+  insurance: 0,
+  rto_standard: 0,
+  rto_rate: 0,
+  rto_bh: 0,
+  rto_scrap: 0,
+  scheme_consumer: 0,
+  scheme_exchange_scrap: 0,
+  scheme_additional_scrap: 0,
+  scheme_corporate: 0,
+  scheme_intervention: 0,
+  scheme_solar: 0,
+  scheme_msme: 0,
+  scheme_green_bonus: 0,
   brochure_url: "",
 };
 
@@ -85,6 +98,29 @@ export function VariantsPricingAdminPage() {
             <TextField label="Transmission" value={variantForm.transmission} onChange={(value) => setVariantForm((current) => ({ ...current, transmission: value }))} />
             <NumberField label="Ex-showroom Price" value={variantForm.ex_showroom_price} onChange={(value) => setVariantForm((current) => ({ ...current, ex_showroom_price: value }))} />
             <TextField label="Brochure URL" value={variantForm.brochure_url} onChange={(value) => setVariantForm((current) => ({ ...current, brochure_url: value }))} />
+          </div>
+          <div className="mt-6">
+            <h3 className="text-sm font-semibold text-slate-700">Charges (₹)</h3>
+            <div className="mt-3 grid gap-4 md:grid-cols-2">
+              <NumberField label="Insurance" value={variantForm.insurance} onChange={(value) => setVariantForm((current) => ({ ...current, insurance: value }))} min={0} step={1} />
+              <NumberField label="RTO Standard" value={variantForm.rto_standard} onChange={(value) => setVariantForm((current) => ({ ...current, rto_standard: value }))} min={0} step={1} />
+              <NumberField label="RTO Rate" value={variantForm.rto_rate} onChange={(value) => setVariantForm((current) => ({ ...current, rto_rate: value }))} min={0} step={1} />
+              <NumberField label="RTO BH" value={variantForm.rto_bh} onChange={(value) => setVariantForm((current) => ({ ...current, rto_bh: value }))} min={0} step={1} />
+              <NumberField label="RTO Scrap" value={variantForm.rto_scrap} onChange={(value) => setVariantForm((current) => ({ ...current, rto_scrap: value }))} min={0} step={1} />
+            </div>
+          </div>
+          <div className="mt-6">
+            <h3 className="text-sm font-semibold text-slate-700">Schemes (₹)</h3>
+            <div className="mt-3 grid gap-4 md:grid-cols-2">
+              <NumberField label="Consumer Scheme" value={variantForm.scheme_consumer} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_consumer: value }))} min={0} step={1} />
+              <NumberField label="Exchange Scrap Scheme" value={variantForm.scheme_exchange_scrap} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_exchange_scrap: value }))} min={0} step={1} />
+              <NumberField label="Additional Scrap Scheme" value={variantForm.scheme_additional_scrap} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_additional_scrap: value }))} min={0} step={1} />
+              <NumberField label="Corporate Scheme" value={variantForm.scheme_corporate} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_corporate: value }))} min={0} step={1} />
+              <NumberField label="Intervention Scheme" value={variantForm.scheme_intervention} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_intervention: value }))} min={0} step={1} />
+              <NumberField label="Solar Scheme" value={variantForm.scheme_solar} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_solar: value }))} min={0} step={1} />
+              <NumberField label="MSME Scheme" value={variantForm.scheme_msme} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_msme: value }))} min={0} step={1} />
+              <NumberField label="Green Bonus Scheme" value={variantForm.scheme_green_bonus} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_green_bonus: value }))} min={0} step={1} />
+            </div>
           </div>
           <button className="action-button mt-4" onClick={() => void handleVariantSave()}>
             Save Variant
@@ -177,10 +213,14 @@ function NumberField({
   label,
   value,
   onChange,
+  min,
+  step,
 }: {
   label: string;
   value: number;
   onChange: (value: number) => void;
+  min?: number;
+  step?: number;
 }) {
   return (
     <div>
@@ -188,6 +228,8 @@ function NumberField({
       <input
         className="field-input"
         type="number"
+        min={min}
+        step={step}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
       />

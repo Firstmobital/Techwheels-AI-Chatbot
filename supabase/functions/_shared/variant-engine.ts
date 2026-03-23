@@ -161,11 +161,34 @@ function matchesExactPreferences(
   const fuelMatches = fuelType
     ? variant.fuel_type.toLowerCase() === fuelType
     : true;
-  const transmissionMatches = transmission
-    ? variant.transmission.toLowerCase() === transmission
+  const transmissionPreferenceMatches = transmission
+    ? transmissionMatches(variant.transmission, transmission)
     : true;
 
-  return fuelMatches && transmissionMatches;
+  return fuelMatches && transmissionPreferenceMatches;
+}
+
+function transmissionMatches(
+  variantTransmission: string,
+  preference: string | null,
+): boolean {
+  if (preference === null) {
+    return true;
+  }
+
+  const normalizedVariantTransmission = variantTransmission.toLowerCase();
+  const normalizedPreference = preference.toLowerCase();
+
+  if (normalizedPreference === "manual") {
+    return normalizedVariantTransmission === "manual";
+  }
+
+  if (normalizedPreference === "automatic") {
+    return normalizedVariantTransmission === "automatic" ||
+      normalizedVariantTransmission === "dca";
+  }
+
+  return normalizedVariantTransmission === normalizedPreference;
 }
 
 function calculateFallbackScore(
@@ -179,7 +202,7 @@ function calculateFallbackScore(
     score += 2;
   }
 
-  if (transmission && variant.transmission.toLowerCase() === transmission) {
+  if (transmission && transmissionMatches(variant.transmission, transmission)) {
     score += 1;
   }
 

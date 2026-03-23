@@ -11,6 +11,7 @@ import {
   routeInboundMessage,
   type RouterResult,
 } from "../_shared/message-router.ts";
+import { getSupabaseAdminClient } from "../_shared/supabase-admin.ts";
 
 type WhatsAppNormalizedMessage = {
   phone: string;
@@ -248,6 +249,98 @@ function normalizeInboundPayload(
   return normalizedMessages;
 }
 
+async function processStatusCallbacks(payload: unknown): Promise<void> {
+  if (!payload || typeof payload !== "object") {
+    return;
+  }
+
+  const root = payload as Record<string, unknown>;
+  const entries = Array.isArray(root.entry) ? root.entry : [];
+  const supabase = getSupabaseAdminClient();
+
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    const entryRecord = entry as Record<string, unknown>;
+    const changes = Array.isArray(entryRecord.changes)
+      ? entryRecord.changes
+      : [];
+
+    for (const change of changes) {
+      if (!change || typeof change !== "object") {
+        continue;
+      }
+
+      const changeRecord = change as Record<string, unknown>;
+      const value = changeRecord.value;
+
+      if (!value || typeof value !== "object") {
+        continue;
+      }
+
+      const valueRecord = value as Record<string, unknown>;
+      const statuses = Array.isArray(valueRecord.statuses)
+        ? valueRecord.statuses
+        : [];
+
+      for (const statusEntry of statuses) {
+        if (!statusEntry || typeof statusEntry !== "object") {
+          continue;
+        }
+
+        const statusRecord = statusEntry as Record<string, unknown>;
+        const whatsappMessageId = typeof statusRecord.id === "string"
+          ? statusRecord.id
+          : null;
+        const status = typeof statusRecord.status === "string"
+          ? statusRecord.status
+          : null;
+        const timestamp = parseWhatsAppTimestamp(statusRecord.timestamp);
+
+        if (
+          !whatsappMessageId ||
+          (status !== "delivered" && status !== "read")
+        ) {
+          continue;
+        }
+
+        try {
+          const { error } = await supabase
+            .from("messages")
+            .update({
+              status,
+            })
+            .eq("whatsapp_message_id", whatsappMessageId);
+
+          if (error) {
+            console.error(
+              "[whatsapp-webhook] Failed to update message status callback",
+              {
+                whatsappMessageId,
+                status,
+                timestamp,
+                error,
+              },
+            );
+          }
+        } catch (error) {
+          console.error(
+            "[whatsapp-webhook] Error updating message status callback",
+            {
+              whatsappMessageId,
+              status,
+              timestamp,
+              error,
+            },
+          );
+        }
+      }
+    }
+  }
+}
+
 function validateWebhookSubscription(
   url: URL,
   config: WhatsAppConfig,
@@ -282,12 +375,12 @@ async function sendWhatsAppReply(
   phone: string,
   replyText: string,
   config: WhatsAppConfig,
-): Promise<void> {
+): Promise<boolean> {
   const { accessToken, phoneNumberId } = config;
 
   if (!accessToken || !phoneNumberId) {
     console.warn("Missing WhatsApp config");
-    return;
+    return false;
   }
 
   try {
@@ -317,12 +410,16 @@ async function sendWhatsAppReply(
         status: response.status,
         body: responseBody,
       });
+      return false;
     }
+
+    return true;
   } catch (error) {
     console.error("[whatsapp-webhook] Error sending WhatsApp reply", {
       phone,
       error,
     });
+    return false;
   }
 }
 
@@ -354,6 +451,10 @@ async function handleInboundEvent(
   }
 
   const normalizedMessages = normalizeInboundPayload(payload);
+
+  await processStatusCallbacks(payload).catch((err) =>
+    console.error("[whatsapp-webhook] Failed to process status callbacks", err)
+  );
 
   const metadataPhoneNumberIds: string[] = [];
   const entries = Array.isArray(root?.entry) ? root.entry : [];
@@ -505,21 +606,70 @@ async function handleInboundEvent(
   }
 
   for (const routerReply of routerReplies) {
-    await sendWhatsAppReply(
+    const sendSucceeded = await sendWhatsAppReply(
       routerReply.phone,
       routerReply.reply_text,
       config,
     );
+
+    if (!sendSucceeded) {
+      console.error("[whatsapp-webhook] Outbound reply send failed", {
+        phone: routerReply.phone,
+        replyTextLength: routerReply.reply_text.length,
+      });
+
+      const supabase = getSupabaseAdminClient();
+      const { data: pendingMessage, error: pendingMessageError } =
+        await supabase
+          .from("messages")
+          .select("id")
+          .eq("conversation_id", routerReply.conversation_id)
+          .eq("direction", "outbound")
+          .or("status.is.null,status.eq.pending")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+      if (pendingMessageError) {
+        console.error(
+          "[whatsapp-webhook] Failed to load pending outbound message after send failure",
+          {
+            conversationId: routerReply.conversation_id,
+            phone: routerReply.phone,
+            error: pendingMessageError,
+          },
+        );
+        continue;
+      }
+
+      if (!pendingMessage) {
+        continue;
+      }
+
+      const { error: updateFailedStatusError } = await supabase
+        .from("messages")
+        .update({ status: "failed" })
+        .eq("id", pendingMessage.id);
+
+      if (updateFailedStatusError) {
+        console.error(
+          "[whatsapp-webhook] Failed to mark outbound message as failed",
+          {
+            conversationId: routerReply.conversation_id,
+            phone: routerReply.phone,
+            messageId: pendingMessage.id,
+            error: updateFailedStatusError,
+          },
+        );
+      }
+    }
   }
 
   return jsonResponse({
     success: true,
-    message: "Webhook event received",
     normalized_count: normalizedMessages.length,
     persisted_count: persistenceResults.length,
     router_reply_count: routerReplies.length,
-    router_replies: routerReplies,
-    normalized_messages: normalizedMessages,
   });
 }
 

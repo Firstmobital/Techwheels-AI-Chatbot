@@ -126,6 +126,7 @@ export async function findOrCreateConversationByPhone(
       .from("conversations")
       .select("id, phone, lead_id, campaign_id")
       .eq("phone", phone)
+      .eq("is_open", true)
       .maybeSingle();
 
   if (existingConversationError) {
@@ -205,6 +206,7 @@ export async function findOrCreateConversationByPhone(
       .from("conversations")
       .select("id, phone, lead_id, campaign_id")
       .eq("phone", phone)
+      .eq("is_open", true)
       .single();
 
   if (duplicateConversationError || !duplicateConversation) {
@@ -471,6 +473,88 @@ async function insertMessage(
 export async function persistInboundMessage(
   message: NormalizedMessage,
 ): Promise<PersistedInboundMessageResult> {
+  const supabase = getSupabaseAdminClient();
+
+  if (message.whatsapp_message_id) {
+    const { data: existingMessage, error: existingMessageError } =
+      await supabase
+        .from("messages")
+        .select(
+          "id, conversation_id, phone, direction, message_type, content, raw_payload, whatsapp_message_id, status, created_at",
+        )
+        .eq("whatsapp_message_id", message.whatsapp_message_id)
+        .maybeSingle();
+
+    if (existingMessageError) {
+      console.error(
+        "[conversation-manager] Failed to check duplicate inbound message before persistence",
+        {
+          whatsappMessageId: message.whatsapp_message_id,
+          error: existingMessageError,
+        },
+      );
+      throw new Error("Failed to check duplicate inbound message");
+    }
+
+    if (existingMessage) {
+      const { data: existingConversation, error: existingConversationError } =
+        await supabase
+          .from("conversations")
+          .select("id, phone, lead_id, campaign_id")
+          .eq("id", existingMessage.conversation_id)
+          .single();
+
+      if (existingConversationError || !existingConversation) {
+        console.error(
+          "[conversation-manager] Failed to load conversation for duplicate inbound message",
+          {
+            whatsappMessageId: message.whatsapp_message_id,
+            conversationId: existingMessage.conversation_id,
+            error: existingConversationError,
+          },
+        );
+        throw new Error("Failed to load conversation for duplicate inbound message");
+      }
+
+      if (!existingConversation.lead_id) {
+        console.error(
+          "[conversation-manager] Duplicate inbound message conversation is missing lead_id",
+          {
+            whatsappMessageId: message.whatsapp_message_id,
+            conversationId: existingConversation.id,
+          },
+        );
+        throw new Error("Duplicate inbound message conversation is missing lead");
+      }
+
+      const { data: existingLead, error: existingLeadError } = await supabase
+        .from("leads")
+        .select("id, phone")
+        .eq("id", existingConversation.lead_id)
+        .single();
+
+      if (existingLeadError || !existingLead) {
+        console.error(
+          "[conversation-manager] Failed to load lead for duplicate inbound message",
+          {
+            whatsappMessageId: message.whatsapp_message_id,
+            conversationId: existingConversation.id,
+            leadId: existingConversation.lead_id,
+            error: existingLeadError,
+          },
+        );
+        throw new Error("Failed to load lead for duplicate inbound message");
+      }
+
+      return {
+        lead: existingLead,
+        conversation: existingConversation,
+        message: existingMessage,
+        duplicate: true,
+      };
+    }
+  }
+
   const lead = await findOrCreateLeadPlaceholderByPhone(message.phone);
   const conversation = await findOrCreateConversationByPhone(
     message.phone,

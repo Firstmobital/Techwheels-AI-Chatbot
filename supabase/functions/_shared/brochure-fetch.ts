@@ -26,24 +26,16 @@ export async function fetchBrochureContext(input: {
     };
   }
 
-  if (!brochureUrl.toLowerCase().endsWith(".pdf")) {
-    console.info("[brochure-fetch] Skipping non-PDF brochure URL", {
-      brochureUrl,
-    });
-    return {
-      brochure_url: brochureUrl,
-      brochure_base64: null,
-      mime_type: null,
-    };
-  }
+  const effectiveFetchUrl = resolveToDirectDownloadUrl(brochureUrl);
 
   try {
-    const response = await fetch(brochureUrl);
+    const response = await fetch(effectiveFetchUrl);
 
     if (!response.ok) {
       const errorBody = await response.text();
       console.error("[brochure-fetch] Failed to fetch brochure PDF", {
         brochureUrl,
+        effectiveFetchUrl,
         status: response.status,
         errorBody,
       });
@@ -54,7 +46,23 @@ export async function fetchBrochureContext(input: {
       };
     }
 
+    const contentType = response.headers.get("content-type")?.toLowerCase() ??
+      "";
     const brochureBytes = new Uint8Array(await response.arrayBuffer());
+
+    if (!contentType.includes("pdf") && brochureBytes.length === 0) {
+      console.error("[brochure-fetch] Brochure download returned empty body", {
+        brochureUrl,
+        effectiveFetchUrl,
+        contentType,
+      });
+      return {
+        brochure_url: brochureUrl,
+        brochure_base64: null,
+        mime_type: null,
+      };
+    }
+
     const brochureBase64 = toBase64(brochureBytes);
 
     return {
@@ -65,6 +73,7 @@ export async function fetchBrochureContext(input: {
   } catch (error) {
     console.error("[brochure-fetch] Failed to download brochure URL", {
       brochureUrl,
+      effectiveFetchUrl,
       error,
     });
     return {
@@ -73,6 +82,19 @@ export async function fetchBrochureContext(input: {
       mime_type: null,
     };
   }
+}
+
+function resolveToDirectDownloadUrl(url: string): string {
+  const googleDriveMatch = url.match(
+    /^https:\/\/drive\.google\.com\/file\/d\/([^/]+)\/view(?:\?.*)?$/i,
+  );
+
+  if (!googleDriveMatch) {
+    return url;
+  }
+
+  const [, fileId] = googleDriveMatch;
+  return `https://drive.google.com/uc?export=download&id=${fileId}`;
 }
 
 async function loadVariantBrochureUrl(

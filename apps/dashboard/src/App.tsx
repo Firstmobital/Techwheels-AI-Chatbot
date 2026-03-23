@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { RequireAuth } from "./components/auth/RequireAuth";
 import { AppLayout } from "./components/layout/AppLayout";
+import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { CampaignSenderPage } from "./pages/CampaignSenderPage";
 import { ConversationPage } from "./pages/ConversationPage";
 import { LeadDetailPage } from "./pages/LeadDetailPage";
@@ -29,6 +30,7 @@ export function App() {
                   path="/admin/variants-pricing"
                   element={<VariantsPricingAdminPage />}
                 />
+                <Route path="/analytics" element={<AnalyticsPage />} />
                 <Route path="/campaigns" element={<CampaignSenderPage />} />
               </Routes>
             </AppLayout>
