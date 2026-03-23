@@ -112,7 +112,7 @@ async function loadVariantBrochureUrl(
     .limit(10);
 
   if (fuelType) {
-    query = query.eq("fuel_type", fuelType);
+    query = query.ilike("fuel_type", fuelType);
   }
 
   const { data, error } = await query;
