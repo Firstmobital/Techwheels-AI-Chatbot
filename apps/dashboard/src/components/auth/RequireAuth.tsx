@@ -25,13 +25,6 @@ export function RequireAuth({ children }: PropsWithChildren) {
 
     void loadSession();
 
-    // Fallback timeout: ensure loading state clears even if getSession hangs
-    const timeoutId = setTimeout(() => {
-      if (mounted) {
-        setLoading(false);
-      }
-    }, 3000);
-
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
@@ -43,7 +36,6 @@ export function RequireAuth({ children }: PropsWithChildren) {
 
     return () => {
       mounted = false;
-      clearTimeout(timeoutId);
       subscription.unsubscribe();
     };
   }, []);
