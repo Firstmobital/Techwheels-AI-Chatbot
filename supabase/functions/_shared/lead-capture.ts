@@ -31,9 +31,20 @@ export type LeadCaptureResult = {
   completed: boolean;
 };
 
-const FALLBACK_MODELS = ["Hyundai Creta", "Kia Seltos"];
+const FALLBACK_MODELS = [
+  "Altroz",
+  "Curvv",
+  "Harrier",
+  "Nexon",
+  "Punch",
+  "Safari",
+  "Sierra",
+  "Tiago",
+  "Tigor",
+  "Xpres T",
+];
 const SUPPORTED_FUELS = ["petrol", "diesel", "cng", "ev"];
-const SUPPORTED_TRANSMISSIONS = ["manual", "automatic"];
+const SUPPORTED_TRANSMISSIONS = ["manual", "automatic", "dca"];
 const SUPPORTED_EXCHANGE_VALUES = ["yes", "no"];
 
 export async function loadLeadCaptureContext(
@@ -92,7 +103,7 @@ export async function handleLeadCaptureStep(
   if (conversationState === "qualified" || currentStep === "complete") {
     return {
       replyText:
-        "Thanks, I have your details. I can now help you with variants and pricing.",
+        "Aapki details already hain mere paas! Ab main variants aur pricing mein help kar sakta hoon. 😊",
       conversationState: "qualified",
       conversationStep: "complete",
       completed: true,
@@ -107,7 +118,8 @@ export async function handleLeadCaptureStep(
     );
 
     return {
-      replyText: "Welcome to Techwheels. May I have your name?",
+      replyText:
+        "Namaste! 🙏 Welcome to *Techwheels Tata Motors*.\n\nMain aapko best Tata car dhundhne mein help karunga. Aapka naam kya hai?",
       conversationState: "lead_capture",
       conversationStep: "ask_name",
       completed: false,
@@ -121,7 +133,7 @@ export async function handleLeadCaptureStep(
 
     if (!normalizedName) {
       return {
-        replyText: "Please share your name so I can help you better.",
+        replyText: "Aapka naam share karein taaki main better help kar sakun. 😊",
         conversationState: "lead_capture",
         conversationStep: "ask_name",
         completed: false,
@@ -140,9 +152,9 @@ export async function handleLeadCaptureStep(
     const supportedModels = await getSupportedModels();
     return {
       replyText:
-        `Thanks ${normalizedName}. Which model are you interested in? Available options: ${
+        `Thanks ${normalizedName}! 😊\n\nKaun si Tata car mein interested hain aap? Hamare paas available hain:\n${
           supportedModels.join(", ")
-        }.`,
+        }\n\nBas model ka naam bhejein.`,
       conversationState: "lead_capture",
       conversationStep: "ask_model",
       completed: false,
@@ -158,9 +170,8 @@ export async function handleLeadCaptureStep(
 
     if (!selectedModel) {
       return {
-        replyText: `Please choose one of these models: ${
-          supportedModels.join(", ")
-        }.`,
+        replyText:
+          `Please inn mein se ek choose karein:\n${supportedModels.join(", ")}`,
         conversationState: "lead_capture",
         conversationStep: "ask_model",
         completed: false,
@@ -178,7 +189,7 @@ export async function handleLeadCaptureStep(
 
     return {
       replyText:
-        "Got it. Which fuel type do you prefer: petrol, diesel, cng, or ev?",
+        `${selectedModel} — great choice! ⚡\n\nKaun sa fuel type prefer karenge aap?\n\n• *Petrol*\n• *Diesel*\n• *CNG*\n• *EV* (electric)`,
       conversationState: "lead_capture",
       conversationStep: "ask_fuel",
       completed: false,
@@ -191,7 +202,7 @@ export async function handleLeadCaptureStep(
     if (!fuelType) {
       return {
         replyText:
-          "Please reply with one fuel type: petrol, diesel, cng, or ev.",
+          "Please reply karein: *petrol*, *diesel*, *cng*, ya *ev*",
         conversationState: "lead_capture",
         conversationStep: "ask_fuel",
         completed: false,
@@ -209,7 +220,7 @@ export async function handleLeadCaptureStep(
 
     return {
       replyText:
-        "Thanks. Which transmission would you like: manual or automatic?",
+        "Perfect! Transmission kaun sa chahiye?\n\n• *Manual*\n• *Automatic* (AMT)\n• *DCA* (dual clutch automatic — smoother & sportier)",
       conversationState: "lead_capture",
       conversationStep: "ask_transmission",
       completed: false,
@@ -222,7 +233,7 @@ export async function handleLeadCaptureStep(
     if (!transmission) {
       return {
         replyText:
-          "Please reply with one transmission option: manual or automatic.",
+          "Please reply karein: *manual*, *automatic*, ya *dca*",
         conversationState: "lead_capture",
         conversationStep: "ask_transmission",
         completed: false,
@@ -239,7 +250,8 @@ export async function handleLeadCaptureStep(
     );
 
     return {
-      replyText: "Do you have a car for exchange? Please reply yes or no.",
+      replyText:
+        "Almost done! Kya aapke paas exchange ke liye purani car hai?\n\nReply karein *yes* ya *no*",
       conversationState: "lead_capture",
       conversationStep: "ask_exchange",
       completed: false,
@@ -254,7 +266,7 @@ export async function handleLeadCaptureStep(
 
     if (!exchangeValue) {
       return {
-        replyText: "Please reply yes or no for exchange requirement.",
+        replyText: "Please *yes* ya *no* reply karein.",
         conversationState: "lead_capture",
         conversationStep: "ask_exchange",
         completed: false,
@@ -273,9 +285,13 @@ export async function handleLeadCaptureStep(
       "complete",
     );
 
+    const exchangeNote = exchangeRequired
+      ? "\n\nExchange benefit bhi calculate karke bataunga! 💰"
+      : "";
+
     return {
       replyText:
-        "Perfect. I have your details now. I can help you next with matching variants and on-road pricing.",
+        `Shukriya! 🎉 Aapki details le li hain.\n\nAb main aapko matching variants aur complete on-road pricing share karta hoon.${exchangeNote}\n\nPrice jaanna hai ya features ke baare mein poochna hai?`,
       conversationState: "qualified",
       conversationStep: "complete",
       completed: true,
@@ -289,7 +305,7 @@ export async function handleLeadCaptureStep(
   );
 
   return {
-    replyText: "Let’s start quickly. May I have your name?",
+    replyText: "Namaste! 🙏 Shuru karte hain. Aapka naam kya hai?",
     conversationState: "lead_capture",
     conversationStep: "ask_name",
     completed: false,
@@ -311,11 +327,11 @@ async function getSupportedModels(): Promise<string[]> {
     return FALLBACK_MODELS;
   }
 
-  const uniqueModels = [
+  const uniqueModels: string[] = [
     ...new Set(
-      (data ?? [])
-        .map((variant) => variant.model)
-        .filter((model): model is string =>
+      ((data ?? []) as Array<{ model: unknown }>)
+        .map((variant: { model: unknown }) => variant.model)
+        .filter((model: unknown): model is string =>
           typeof model === "string" && model.length > 0
         ),
     ),

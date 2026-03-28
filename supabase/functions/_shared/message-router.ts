@@ -47,6 +47,9 @@ export type IntentName =
   | "pricing"
   | "features"
   | "comparison"
+  | "test_drive"
+  | "emi"
+  | "delivery"
   | "fallback";
 
 type RouteName =
@@ -54,6 +57,9 @@ type RouteName =
   | "pricing"
   | "features"
   | "comparison"
+  | "test_drive"
+  | "emi"
+  | "delivery"
   | "fallback"
   | "multi_intent";
 
@@ -76,6 +82,9 @@ const GREETING_KEYWORDS = [
   "good afternoon",
   "good evening",
   "namaste",
+  "namaskar",
+  "hlo",
+  "hii",
 ];
 
 const PRICING_KEYWORDS = [
@@ -83,13 +92,29 @@ const PRICING_KEYWORDS = [
   "pricing",
   "on road",
   "on-road",
+  "onroad",
   "cost",
   "quote",
   "discount",
   "scheme",
   "offer",
   "kitna",
+  "kimat",
+  "keemat",
+  "daam",
+  "paisa",
+  "rupee",
+  "lakh",
   "rate",
+  "bata",
+  "btao",
+  "batao",
+  "kitne ka",
+  "kya hai price",
+  "kya price",
+  "total price",
+  "ex showroom",
+  "ex-showroom",
 ];
 
 const FEATURE_KEYWORDS = [
@@ -110,6 +135,35 @@ const FEATURE_KEYWORDS = [
   "ground clearance",
   "boot",
   "seat",
+  "camera",
+  "screen",
+  "display",
+  "touchscreen",
+  "charging",
+  "battery",
+  "colour",
+  "color",
+  "colors",
+  "colours",
+  "warranty",
+  "guarantee",
+  "space",
+  "luggage",
+  "power",
+  "torque",
+  "pickup",
+  "comfort",
+  "interior",
+  "exterior",
+  "ventilated",
+  "wireless",
+  "carplay",
+  "android auto",
+  "cruise control",
+  "parking",
+  "sensor",
+  "v2l",
+  "v2v",
 ];
 
 const COMPARISON_KEYWORDS = [
@@ -119,6 +173,61 @@ const COMPARISON_KEYWORDS = [
   "versus",
   "better than",
   "difference",
+  "fark",
+  "antar",
+  "kaun sa better",
+  "which is better",
+  "konsa",
+];
+
+const TEST_DRIVE_KEYWORDS = [
+  "test drive",
+  "test-drive",
+  "testdrive",
+  "test karna",
+  "drive karna",
+  "chalana",
+  "dekhna hai",
+  "showroom aana",
+  "visit",
+  "sunday",
+  "saturday",
+  "kal aana",
+  "aa sakta",
+  "aa sakti",
+  "book",
+  "slot",
+  "appointment",
+];
+
+const EMI_KEYWORDS = [
+  "emi",
+  "loan",
+  "finance",
+  "monthly",
+  "installment",
+  "kist",
+  "downpayment",
+  "down payment",
+  "interest",
+  "bank",
+  "financer",
+  "kitni emi",
+  "monthly kitna",
+];
+
+const DELIVERY_KEYWORDS = [
+  "delivery",
+  "waiting",
+  "waiting period",
+  "kitne din",
+  "kab milegi",
+  "kab milega",
+  "stock",
+  "available",
+  "availability",
+  "kitne time",
+  "booking",
 ];
 
 export async function routeInboundMessage(
@@ -151,7 +260,12 @@ export async function routeInboundMessage(
 
   const detectedIntents = detectIntents(inboundMessage.content);
   const actionableIntents = detectedIntents.filter((intent) =>
-    intent === "pricing" || intent === "features" || intent === "comparison"
+    intent === "pricing" ||
+    intent === "features" ||
+    intent === "comparison" ||
+    intent === "test_drive" ||
+    intent === "emi" ||
+    intent === "delivery"
   );
   const isCampaignContinuation = Boolean(context.conversation.campaign_id) &&
     isCampaignEngagementMessage(inboundMessage);
@@ -202,11 +316,38 @@ export async function routeInboundMessage(
       });
     }
 
-    route = actionableIntents.length > 1
+    if (actionableIntents.includes("test_drive")) {
+      sections.push({
+        title: "Test Drive",
+        body: handleTestDriveRoute(context),
+      });
+    }
+
+    if (actionableIntents.includes("emi")) {
+      sections.push({
+        title: "Finance & EMI",
+        body: handleEmiRoute(context),
+      });
+    }
+
+    if (actionableIntents.includes("delivery")) {
+      sections.push({
+        title: "Delivery",
+        body: handleDeliveryRoute(context),
+      });
+    }
+
+    const primaryActionable = actionableIntents.filter((i) =>
+      i === "pricing" || i === "features" || i === "comparison" ||
+      i === "test_drive" || i === "emi" || i === "delivery"
+    );
+
+    route = primaryActionable.length > 1
       ? "multi_intent"
-      : actionableIntents[0] === "comparison"
+      : primaryActionable[0] === "comparison"
       ? "comparison"
-      : actionableIntents[0];
+      : primaryActionable[0] as RouteName;
+
     replyText = formatCombinedReply(
       sections,
       effectiveDetectedIntents.includes("greeting"),
@@ -267,6 +408,18 @@ export function detectIntents(messageText: string | null): IntentName[] {
   if (COMPARISON_KEYWORDS.some((keyword) => normalizedText.includes(keyword))) {
     intents.add("comparison");
     intents.add("features");
+  }
+
+  if (TEST_DRIVE_KEYWORDS.some((keyword) => normalizedText.includes(keyword))) {
+    intents.add("test_drive");
+  }
+
+  if (EMI_KEYWORDS.some((keyword) => normalizedText.includes(keyword))) {
+    intents.add("emi");
+  }
+
+  if (DELIVERY_KEYWORDS.some((keyword) => normalizedText.includes(keyword))) {
+    intents.add("delivery");
   }
 
   if (intents.size === 0) {
@@ -373,7 +526,7 @@ async function handlePricingRoute(
   inboundText: string | null,
 ): Promise<string> {
   if (!context.lead?.interested_model) {
-    return "I can help with price. First, please tell me which model you are interested in.";
+    return "Price jaanne ke liye pehle model select karein. Kaun si car mein interested hain aap?";
   }
 
   const matchingVariants = await getMatchingVariants({
@@ -384,7 +537,7 @@ async function handlePricingRoute(
   });
 
   if (matchingVariants.length === 0) {
-    return `I could not find an active variant for ${context.lead.interested_model} right now. I can connect you with our sales advisor for the latest pricing help.`;
+    return `${context.lead.interested_model} ke active variants abhi available nahi hain. Main aapko sales advisor se connect karta hoon.`;
   }
 
   const selectedVariant = resolveVariantForPricing(
@@ -415,7 +568,7 @@ async function handleFeaturesRoute(
   inboundText: string | null,
 ): Promise<string> {
   if (!context.lead?.interested_model) {
-    return "I can help with features and specifications. Please tell me which model you want to know about.";
+    return "Features ke baare mein poochne ke liye pehle model select karein.";
   }
 
   const aiResult: AIAnswerResponse = await answerBrochureQuestion({
@@ -431,11 +584,28 @@ async function handleFeaturesRoute(
 }
 
 function buildFallbackReply(context: RouterContext): string {
-  const modelReference = context.lead?.interested_model
-    ? ` for ${context.lead.interested_model}`
-    : "";
+  const name = context.lead?.customer_name
+    ? ` ${context.lead.customer_name}` : "";
+  const modelRef = context.lead?.interested_model
+    ? ` for ${context.lead.interested_model}` : "";
 
-  return `I can help with price${modelReference}, features, or the best variant. Do you want price, features, or best variant? I can also connect you with a human advisor.`;
+  return `Main aapki kaise help kar sakta hoon${name}? 😊\n\nAap ye pooch sakte hain:\n• *Price* — on-road breakdown${modelRef}\n• *Features* — specifications, safety, tech\n• *Test Drive* — slot book karna\n• *EMI* — finance options\n• *Delivery* — waiting period & stock`;
+}
+
+function handleTestDriveRoute(context: RouterContext): string {
+  const name = context.lead?.customer_name ?? "Sir/Ma'am";
+  const model = context.lead?.interested_model ?? "the car";
+  return `Bilkul ${name}! 🚗 ${model} ka test drive arrange kar denge.\n\nHamari team aapko call karke slot confirm karegi.\nHum Mon–Sat 9am–7pm available hain.\n\nKya aap preferred date & time bata sakte hain?`;
+}
+
+function handleEmiRoute(context: RouterContext): string {
+  const model = context.lead?.interested_model ?? "this car";
+  return `${model} ke liye EMI options available hain! 💰\n\nHamari finance team aapko best rates ke saath complete breakdown share karegi — including down payment, tenure options, and bank partners.\n\nKya aap chahenge ki finance advisor aapko call kare?`;
+}
+
+function handleDeliveryRoute(context: RouterContext): string {
+  const model = context.lead?.interested_model ?? "this model";
+  return `${model} ki delivery ke baare mein — ⏱️\n\nCurrent waiting period typically 2–4 weeks hai, but exact availability aapke chosen variant par depend karti hai.\n\nHamari team aapko exact stock status aur delivery date confirm karegi. Shall I arrange a callback?`;
 }
 
 function formatCombinedReply(
@@ -546,10 +716,12 @@ async function updateLeadScore(
   const messageCount = count ?? 0;
   const wantsPricing = detectedIntents.includes("pricing") || route === "pricing";
   const wantsFeatures = detectedIntents.includes("features");
+  const wantsTestDrive = detectedIntents.includes("test_drive") ||
+    route === "test_drive";
 
   let newStatus: string | null = null;
 
-  if (wantsPricing && messageCount >= 2) {
+  if (wantsTestDrive || (wantsPricing && messageCount >= 2)) {
     newStatus = "hot";
   } else if (wantsPricing || wantsFeatures) {
     newStatus = "warm";

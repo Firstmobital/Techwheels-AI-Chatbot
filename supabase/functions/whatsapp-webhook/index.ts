@@ -423,33 +423,13 @@ async function sendWhatsAppReply(
   }
 }
 
-async function handleInboundEvent(
-  req: Request,
+// This function does all the heavy work — AI calls, DB writes, sending replies.
+// It is called via EdgeRuntime.waitUntil() so it runs AFTER the 200 is returned to Meta.
+async function processInboundPayload(
+  payload: unknown,
   config: WhatsAppConfig,
-): Promise<Response> {
-  let payload: unknown;
-
-  try {
-    payload = await req.json();
-  } catch (error) {
-    console.error("[whatsapp-webhook] Invalid JSON payload", error);
-    return jsonResponse({ error: "Invalid JSON payload" }, 400);
-  }
-
-  const root = payload && typeof payload === "object"
-    ? payload as Record<string, unknown>
-    : null;
-  const objectType = root && typeof root.object === "string"
-    ? root.object
-    : null;
-
-  if (objectType !== "whatsapp_business_account") {
-    console.error("[whatsapp-webhook] Unsupported webhook object", {
-      objectType,
-    });
-    return jsonResponse({ error: "Unsupported webhook object" }, 400);
-  }
-
+): Promise<void> {
+  const root = payload as Record<string, unknown>;
   const normalizedMessages = normalizeInboundPayload(payload);
 
   await processStatusCallbacks(payload).catch((err) =>
@@ -460,27 +440,17 @@ async function handleInboundEvent(
   const entries = Array.isArray(root?.entry) ? root.entry : [];
 
   for (const entry of entries) {
-    if (!entry || typeof entry !== "object") {
-      continue;
-    }
-
+    if (!entry || typeof entry !== "object") continue;
     const entryRecord = entry as Record<string, unknown>;
     const changes = Array.isArray(entryRecord.changes)
       ? entryRecord.changes
       : [];
 
     for (const change of changes) {
-      if (!change || typeof change !== "object") {
-        continue;
-      }
-
+      if (!change || typeof change !== "object") continue;
       const changeRecord = change as Record<string, unknown>;
       const value = changeRecord.value;
-
-      if (!value || typeof value !== "object") {
-        continue;
-      }
-
+      if (!value || typeof value !== "object") continue;
       const valueRecord = value as Record<string, unknown>;
       const metadata = valueRecord.metadata;
 
@@ -509,11 +479,8 @@ async function handleInboundEvent(
     );
   }
 
-  console.info("[whatsapp-webhook] Inbound event processed", {
-    objectType,
+  console.info("[whatsapp-webhook] Processing inbound payload", {
     normalizedMessageCount: normalizedMessages.length,
-    hasAccessTokenConfigured: Boolean(config.accessToken),
-    hasPhoneNumberIdConfigured: Boolean(config.phoneNumberId),
   });
 
   const persistenceResults: PersistedInboundMessageResult[] = [];
@@ -665,11 +632,9 @@ async function handleInboundEvent(
     }
   }
 
-  return jsonResponse({
-    success: true,
-    normalized_count: normalizedMessages.length,
-    persisted_count: persistenceResults.length,
-    router_reply_count: routerReplies.length,
+  console.info("[whatsapp-webhook] Processing complete", {
+    persistedCount: persistenceResults.length,
+    routerReplyCount: routerReplies.length,
   });
 }
 
@@ -683,7 +648,48 @@ serve(async (req) => {
     }
 
     if (req.method === "POST") {
-      return await handleInboundEvent(req, config);
+      // Parse JSON and validate synchronously — must happen before returning
+      let payload: unknown;
+      try {
+        payload = await req.json();
+      } catch (error) {
+        console.error("[whatsapp-webhook] Invalid JSON payload", error);
+        return jsonResponse({ error: "Invalid JSON payload" }, 400);
+      }
+
+      const root = payload && typeof payload === "object"
+        ? payload as Record<string, unknown>
+        : null;
+      const objectType = root && typeof root.object === "string"
+        ? root.object
+        : null;
+
+      if (objectType !== "whatsapp_business_account") {
+        console.error("[whatsapp-webhook] Unsupported webhook object", {
+          objectType,
+        });
+        return jsonResponse({ error: "Unsupported webhook object" }, 400);
+      }
+
+      // Return 200 to Meta immediately — must be within 20 seconds.
+      // All AI calls, DB writes, and reply sending happen in the background.
+      const processingPromise = processInboundPayload(payload, config).catch(
+        (err) =>
+          console.error(
+            "[whatsapp-webhook] Background processing error",
+            err,
+          ),
+      );
+
+      // EdgeRuntime.waitUntil keeps the function alive until processing completes
+      // even after the response has been returned to Meta.
+      // deno-lint-ignore no-explicit-any
+      if (typeof (globalThis as any).EdgeRuntime !== "undefined") {
+        // deno-lint-ignore no-explicit-any
+        (globalThis as any).EdgeRuntime.waitUntil(processingPromise);
+      }
+
+      return jsonResponse({ received: true });
     }
 
     return jsonResponse({ error: "Method not allowed" }, 405);

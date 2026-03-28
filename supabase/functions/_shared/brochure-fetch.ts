@@ -50,7 +50,7 @@ export async function fetchBrochureContext(input: {
       "";
     const brochureBytes = new Uint8Array(await response.arrayBuffer());
 
-    if (!contentType.includes("pdf") && brochureBytes.length === 0) {
+    if (!contentType.includes("pdf")) {
       console.error("[brochure-fetch] Brochure download returned empty body", {
         brochureUrl,
         effectiveFetchUrl,
@@ -129,8 +129,8 @@ async function loadVariantBrochureUrl(
     throw new Error("Failed to load brochure URL from variants");
   }
 
-  const brochureUrl = (data ?? [])
-    .map((variant) => variant.brochure_url)
+  const brochureUrl = ((data ?? []) as Array<{ brochure_url: unknown }>)
+    .map((variant: { brochure_url: unknown }) => variant.brochure_url)
     .find((value): value is string =>
       typeof value === "string" && value.trim().length > 0
     );
