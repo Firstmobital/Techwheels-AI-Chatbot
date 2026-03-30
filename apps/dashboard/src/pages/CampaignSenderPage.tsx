@@ -78,6 +78,7 @@ export function CampaignSenderPage() {
   const [csvText, setCsvText] = useState("");
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   async function loadCampaignData() {
     const [tRows, cRows] = await Promise.all([fetchCampaignTemplates(), fetchCampaigns()]);
@@ -120,10 +121,18 @@ export function CampaignSenderPage() {
   async function handleSend() {
     if (!selectedCampaignId) return;
     setSending(true);
+    setSendError(null);
     try {
       await sendCampaign(selectedCampaignId);
       await loadCampaignData();
       setCampaignRecipients(await fetchCampaignRecipients(selectedCampaignId));
+    } catch (error) {
+      console.error("[CampaignSenderPage] Failed to send campaign", error);
+      if (error instanceof Error) {
+        setSendError(error.message);
+      } else {
+        setSendError("Failed to send campaign. Please try again.");
+      }
     } finally { setSending(false); }
   }
 
@@ -281,6 +290,12 @@ export function CampaignSenderPage() {
                     </button>
                   )}
                 </div>
+
+                {sendError && (
+                  <div className="mb-3 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-[11px] text-red-700">
+                    {sendError}
+                  </div>
+                )}
 
                 {/* Stats */}
                 {campaignRecipients.length > 0 && (

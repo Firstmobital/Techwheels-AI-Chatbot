@@ -323,9 +323,42 @@ export async function createCampaignWithRecipients(input: {
 }
 
 export async function sendCampaign(campaignId: string): Promise<void> {
-  const { error } = await supabase.functions.invoke("campaign-sender", {
-    body: { campaign_id: campaignId },
-  });
+  async function invokeWithToken(accessToken: string) {
+    return supabase.functions.invoke("campaign-sender", {
+      body: { campaign_id: campaignId },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  }
+
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+
+  if (sessionError) {
+    console.error("[dashboardApi] Failed to read auth session", sessionError);
+    throw sessionError;
+  }
+
+  let accessToken = session?.access_token;
+  if (!accessToken) {
+    const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError || !refreshedData.session?.access_token) {
+      throw new Error("Session expired. Please sign in again.");
+    }
+    accessToken = refreshedData.session.access_token;
+  }
+
+  let { error } = await invokeWithToken(accessToken);
+
+  if (error && error.message.toLowerCase().includes("401")) {
+    const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
+    if (!refreshError && refreshedData.session?.access_token) {
+      ({ error } = await invokeWithToken(refreshedData.session.access_token));
+    }
+  }
 
   if (error) {
     console.error("[dashboardApi] Failed to invoke campaign sender", error);
