@@ -1,273 +1,281 @@
 import { useEffect, useState } from "react";
-import { PageHeader } from "../components/common/PageHeader";
-import { Panel } from "../components/common/Panel";
-import {
-  fetchPricingRules,
-  fetchVariants,
-  savePricingRule,
-  saveVariant,
-} from "../lib/dashboardApi";
-import type { PricingRuleRecord, VariantRecord } from "../types";
+import { fetchVariants, saveVariant } from "../lib/dashboardApi";
+import type { VariantRecord } from "../types";
 
-const emptyVariantForm = {
-  model: "",
-  variant_name: "",
-  fuel_type: "",
-  transmission: "",
-  ex_showroom_price: 0,
-  insurance: 0,
-  rto_standard: 0,
-  rto_rate: 0,
-  rto_bh: 0,
-  rto_scrap: 0,
-  scheme_consumer: 0,
-  scheme_exchange_scrap: 0,
-  scheme_additional_scrap: 0,
-  scheme_corporate: 0,
-  scheme_intervention: 0,
-  scheme_solar: 0,
-  scheme_msme: 0,
-  scheme_green_bonus: 0,
-  brochure_url: "",
+const SCHEME_KEYS: { key: keyof VariantRecord; label: string }[] = [
+  { key: "scheme_consumer", label: "Consumer" },
+  { key: "scheme_exchange_scrap", label: "Exchange" },
+  { key: "scheme_corporate", label: "Corporate" },
+  { key: "scheme_intervention", label: "Intervention" },
+  { key: "scheme_solar", label: "Solar" },
+  { key: "scheme_msme", label: "MSME" },
+  { key: "scheme_green_bonus", label: "Green Bonus" },
+];
+
+const MODEL_COLORS: Record<string, string> = {
+  "Nexon EV": "#3b4fe0",
+  "Harrier": "#22a06b",
+  "Punch EV": "#f59e0b",
+  "Safari": "#e84393",
+  "Tiago EV": "#8b5cf6",
+  "Altroz": "#06b6d4",
 };
 
-const emptyRuleForm = {
-  model: "",
-  variant_id: "",
-  rule_type: "rto_percent",
-  rule_name: "",
-  value_type: "fixed",
-  value: 0,
-};
+function modelColor(model: string) {
+  for (const [key, color] of Object.entries(MODEL_COLORS)) {
+    if (model.includes(key)) return color;
+  }
+  return "#6b7280";
+}
+
+function lakhFormat(n: number | null) {
+  if (n === null || n === undefined) return "—";
+  return `₹${(n / 100000).toFixed(2)}L`;
+}
+
+function schemeChips(variant: VariantRecord) {
+  return SCHEME_KEYS.filter((s) => (variant[s.key] as number | null) != null && (variant[s.key] as number) > 0).map((s) => s.label);
+}
+
+/* ── Edit modal ── */
+function EditModal({ variant, onClose, onSave }: {
+  variant: Partial<VariantRecord>;
+  onClose: () => void;
+  onSave: (v: Partial<VariantRecord>) => Promise<void>;
+}) {
+  const [form, setForm] = useState<Partial<VariantRecord>>({ ...variant });
+  const [saving, setSaving] = useState(false);
+
+  function set(key: keyof VariantRecord, val: string) {
+    setForm((prev) => ({ ...prev, [key]: val === "" ? null : isNaN(Number(val)) ? val : Number(val) }));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try { await onSave(form); onClose(); }
+    finally { setSaving(false); }
+  }
+
+  const fields: { key: keyof VariantRecord; label: string; type?: string }[] = [
+    { key: "model", label: "Model" },
+    { key: "variant_name", label: "Variant name" },
+    { key: "fuel_type", label: "Fuel type" },
+    { key: "transmission", label: "Transmission" },
+    { key: "ex_showroom_price", label: "Ex-showroom price (₹)", type: "number" },
+    { key: "insurance", label: "Insurance (₹)", type: "number" },
+    { key: "rto_standard", label: "RTO standard (₹)", type: "number" },
+    ...SCHEME_KEYS.map((s) => ({ key: s.key, label: `${s.label} discount (₹)`, type: "number" })),
+    { key: "brochure_url", label: "Brochure URL" },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+      <div className="flex max-h-[80vh] w-[520px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+          <p className="text-[14px] font-semibold text-ink">
+            {form.id ? "Edit variant" : "Add new variant"}
+          </p>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          <div className="grid grid-cols-2 gap-3">
+            {fields.map(({ key, label, type }) => (
+              <div key={String(key)} className={key === "brochure_url" ? "col-span-2" : ""}>
+                <label className="field-label">{label}</label>
+                <input
+                  type={type ?? "text"}
+                  className="field-input text-[12px]"
+                  value={String(form[key] ?? "")}
+                  onChange={(e) => set(key, e.target.value)}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-100 px-6 py-4">
+          <button type="button" className="secondary-button text-[12px]" onClick={onClose}>Cancel</button>
+          <button type="button" className="action-button text-[12px]" disabled={saving} onClick={() => void handleSave()}>
+            {saving ? "Saving…" : "Save variant"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function VariantsPricingAdminPage() {
   const [variants, setVariants] = useState<VariantRecord[]>([]);
-  const [pricingRules, setPricingRules] = useState<PricingRuleRecord[]>([]);
-  const [variantForm, setVariantForm] = useState(emptyVariantForm);
-  const [ruleForm, setRuleForm] = useState(emptyRuleForm);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [modelFilter, setModelFilter] = useState("all");
+  const [editing, setEditing] = useState<Partial<VariantRecord> | null>(null);
 
-  async function loadData() {
-    const [variantRows, pricingRuleRows] = await Promise.all([
-      fetchVariants(),
-      fetchPricingRules(),
-    ]);
-    setVariants(variantRows);
-    setPricingRules(pricingRuleRows);
+  async function load() {
+    setLoading(true);
+    try { setVariants(await fetchVariants()); }
+    finally { setLoading(false); }
   }
 
-  useEffect(() => {
-    void loadData();
-  }, []);
+  useEffect(() => { void load(); }, []);
 
-  async function handleVariantSave() {
-    await saveVariant({
-      ...variantForm,
-      brochure_url: variantForm.brochure_url || null,
-      is_active: true,
-    });
-    setVariantForm(emptyVariantForm);
-    await loadData();
-  }
+  const models = Array.from(new Set(variants.map((v) => v.model))).sort();
 
-  async function handleRuleSave() {
-    await savePricingRule({
-      ...ruleForm,
-      model: ruleForm.model || null,
-      variant_id: ruleForm.variant_id || null,
-      is_stackable: false,
-      conditions: null,
-      is_active: true,
-    });
-    setRuleForm(emptyRuleForm);
-    await loadData();
+  const filtered = variants.filter((v) => {
+    const q = search.toLowerCase();
+    const matchSearch = !q || v.model.toLowerCase().includes(q) || v.variant_name.toLowerCase().includes(q);
+    const matchModel = modelFilter === "all" || v.model === modelFilter;
+    return matchSearch && matchModel;
+  });
+
+  async function handleSave(v: Partial<VariantRecord>) {
+    await saveVariant(v);
+    await load();
   }
 
   return (
-    <div>
-      <PageHeader
-        title="Variant and Pricing Admin"
-        description="Manage active variants and deterministic pricing inputs."
-      />
+    <div className="flex flex-col">
+      {editing && (
+        <EditModal
+          variant={editing}
+          onClose={() => setEditing(null)}
+          onSave={handleSave}
+        />
+      )}
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Panel title="Variant Form" description="Basic CRUD-ready input for variant records.">
-          <div className="grid gap-4 md:grid-cols-2">
-            <TextField label="Model" value={variantForm.model} onChange={(value) => setVariantForm((current) => ({ ...current, model: value }))} />
-            <TextField label="Variant Name" value={variantForm.variant_name} onChange={(value) => setVariantForm((current) => ({ ...current, variant_name: value }))} />
-            <TextField label="Fuel Type" value={variantForm.fuel_type} onChange={(value) => setVariantForm((current) => ({ ...current, fuel_type: value }))} />
-            <TextField label="Transmission" value={variantForm.transmission} onChange={(value) => setVariantForm((current) => ({ ...current, transmission: value }))} />
-            <NumberField label="Ex-showroom Price" value={variantForm.ex_showroom_price} onChange={(value) => setVariantForm((current) => ({ ...current, ex_showroom_price: value }))} />
-            <TextField label="Brochure URL" value={variantForm.brochure_url} onChange={(value) => setVariantForm((current) => ({ ...current, brochure_url: value }))} />
-          </div>
-          <div className="mt-6">
-            <h3 className="text-sm font-semibold text-slate-700">Charges (₹)</h3>
-            <div className="mt-3 grid gap-4 md:grid-cols-2">
-              <NumberField label="Insurance" value={variantForm.insurance} onChange={(value) => setVariantForm((current) => ({ ...current, insurance: value }))} min={0} step={1} />
-              <NumberField label="RTO Standard" value={variantForm.rto_standard} onChange={(value) => setVariantForm((current) => ({ ...current, rto_standard: value }))} min={0} step={1} />
-              <NumberField label="RTO Rate" value={variantForm.rto_rate} onChange={(value) => setVariantForm((current) => ({ ...current, rto_rate: value }))} min={0} step={1} />
-              <NumberField label="RTO BH" value={variantForm.rto_bh} onChange={(value) => setVariantForm((current) => ({ ...current, rto_bh: value }))} min={0} step={1} />
-              <NumberField label="RTO Scrap" value={variantForm.rto_scrap} onChange={(value) => setVariantForm((current) => ({ ...current, rto_scrap: value }))} min={0} step={1} />
+      {/* Top bar */}
+      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3.5">
+        <div>
+          <h2 className="text-[16px] font-semibold text-ink">Variants & Pricing</h2>
+          <p className="text-[11px] text-slate-400">{variants.length} variants · 8 scheme types</p>
+        </div>
+      </header>
+
+      <div className="p-5">
+        {/* KPI row */}
+        <div className="mb-4 grid grid-cols-4 gap-3">
+          {[
+            { label: "Total variants", value: String(variants.length), accent: "#3b4fe0" },
+            { label: "Active models", value: String(models.length), accent: "#22a06b" },
+            { label: "Scheme types", value: "8", accent: "#f59e0b" },
+            { label: "Brochures live", value: String(variants.filter((v) => v.brochure_url).length), accent: "#e84393" },
+          ].map(({ label, value, accent }) => (
+            <div key={label} className="kpi-card" style={{ borderTop: `3px solid ${accent}` }}>
+              <p className="kpi-card-label">{label}</p>
+              <p className="kpi-card-value">{value}</p>
             </div>
-          </div>
-          <div className="mt-6">
-            <h3 className="text-sm font-semibold text-slate-700">Schemes (₹)</h3>
-            <div className="mt-3 grid gap-4 md:grid-cols-2">
-              <NumberField label="Consumer Scheme" value={variantForm.scheme_consumer} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_consumer: value }))} min={0} step={1} />
-              <NumberField label="Exchange Scrap Scheme" value={variantForm.scheme_exchange_scrap} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_exchange_scrap: value }))} min={0} step={1} />
-              <NumberField label="Additional Scrap Scheme" value={variantForm.scheme_additional_scrap} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_additional_scrap: value }))} min={0} step={1} />
-              <NumberField label="Corporate Scheme" value={variantForm.scheme_corporate} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_corporate: value }))} min={0} step={1} />
-              <NumberField label="Intervention Scheme" value={variantForm.scheme_intervention} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_intervention: value }))} min={0} step={1} />
-              <NumberField label="Solar Scheme" value={variantForm.scheme_solar} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_solar: value }))} min={0} step={1} />
-              <NumberField label="MSME Scheme" value={variantForm.scheme_msme} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_msme: value }))} min={0} step={1} />
-              <NumberField label="Green Bonus Scheme" value={variantForm.scheme_green_bonus} onChange={(value) => setVariantForm((current) => ({ ...current, scheme_green_bonus: value }))} min={0} step={1} />
-            </div>
-          </div>
-          <button className="action-button mt-4" onClick={() => void handleVariantSave()}>
-            Save Variant
-          </button>
-        </Panel>
-
-        <Panel title="Pricing Rule Form" description="Basic CRUD-ready input for pricing rules.">
-          <div className="grid gap-4 md:grid-cols-2">
-            <TextField label="Model" value={ruleForm.model} onChange={(value) => setRuleForm((current) => ({ ...current, model: value }))} />
-            <select className="field-input" value={ruleForm.variant_id} onChange={(event) => setRuleForm((current) => ({ ...current, variant_id: event.target.value }))}>
-              <option value="">No variant link</option>
-              {variants.map((variant) => (
-                <option key={variant.id} value={variant.id}>
-                  {variant.model} - {variant.variant_name}
-                </option>
-              ))}
-            </select>
-            <select className="field-input" value={ruleForm.rule_type} onChange={(event) => setRuleForm((current) => ({ ...current, rule_type: event.target.value }))}>
-              <option value="rto_percent">rto_percent</option>
-              <option value="insurance_fixed">insurance_fixed</option>
-              <option value="handling_fixed">handling_fixed</option>
-              <option value="accessory_fixed">accessory_fixed</option>
-              <option value="consumer_scheme">consumer_scheme</option>
-              <option value="exchange_bonus">exchange_bonus</option>
-              <option value="scrap_bonus">scrap_bonus</option>
-              <option value="corporate_discount">corporate_discount</option>
-            </select>
-            <TextField label="Rule Name" value={ruleForm.rule_name} onChange={(value) => setRuleForm((current) => ({ ...current, rule_name: value }))} />
-            <select className="field-input" value={ruleForm.value_type} onChange={(event) => setRuleForm((current) => ({ ...current, value_type: event.target.value }))}>
-              <option value="fixed">fixed</option>
-              <option value="percent">percent</option>
-            </select>
-            <NumberField label="Value" value={ruleForm.value} onChange={(value) => setRuleForm((current) => ({ ...current, value }))} />
-          </div>
-          <button className="action-button mt-4" onClick={() => void handleRuleSave()}>
-            Save Pricing Rule
-          </button>
-        </Panel>
-      </div>
-
-      <div className="mt-6 grid gap-6 xl:grid-cols-2">
-        <Panel title="Variants">
-          <SimpleTable
-            columns={["Model", "Variant", "Fuel", "Transmission", "Price"]}
-            rows={variants.map((variant) => [
-              variant.model,
-              variant.variant_name,
-              variant.fuel_type,
-              variant.transmission,
-              new Intl.NumberFormat("en-IN").format(variant.ex_showroom_price),
-            ])}
-          />
-        </Panel>
-
-        <Panel title="Pricing Rules">
-          <SimpleTable
-            columns={["Rule Name", "Rule Type", "Model", "Value Type", "Value"]}
-            rows={pricingRules.map((rule) => [
-              rule.rule_name,
-              rule.rule_type,
-              rule.model ?? "Variant linked",
-              rule.value_type,
-              String(rule.value),
-            ])}
-          />
-        </Panel>
-      </div>
-    </div>
-  );
-}
-
-function TextField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div>
-      <label className="field-label">{label}</label>
-      <input className="field-input" value={value} onChange={(event) => onChange(event.target.value)} />
-    </div>
-  );
-}
-
-function NumberField({
-  label,
-  value,
-  onChange,
-  min,
-  step,
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-  min?: number;
-  step?: number;
-}) {
-  return (
-    <div>
-      <label className="field-label">{label}</label>
-      <input
-        className="field-input"
-        type="number"
-        min={min}
-        step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
-    </div>
-  );
-}
-
-function SimpleTable({
-  columns,
-  rows,
-}: {
-  columns: string[];
-  rows: string[][];
-}) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full text-sm">
-        <thead>
-          <tr className="border-b border-slate-200 text-left text-slate-500">
-            {columns.map((column) => (
-              <th key={column} className="px-3 py-2 font-medium">
-                {column}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={index} className="border-b border-slate-100">
-              {row.map((cell, cellIndex) => (
-                <td key={`${index}-${cellIndex}`} className="px-3 py-2 text-slate-700">
-                  {cell}
-                </td>
-              ))}
-            </tr>
           ))}
-        </tbody>
-      </table>
+        </div>
+
+        {/* Toolbar */}
+        <div className="mb-3 flex items-center gap-2">
+          <div className="flex flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="#aab0be" strokeWidth="1.5">
+              <circle cx="5.5" cy="5.5" r="4" />
+              <path d="M9 9l2.5 2.5" />
+            </svg>
+            <input
+              className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-slate-400"
+              placeholder="Search variant or model…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <select
+            className="field-input w-44 text-[12px]"
+            value={modelFilter}
+            onChange={(e) => setModelFilter(e.target.value)}
+          >
+            <option value="all">All models</option>
+            {models.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+          <button
+            type="button"
+            className="action-button shrink-0 text-[12px]"
+            onClick={() => setEditing({})}
+          >
+            + Add variant
+          </button>
+        </div>
+
+        {/* Table */}
+        <div className="panel overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-[12px]">
+              <thead>
+                <tr className="bg-slate-50 text-left">
+                  <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wide text-slate-400">Model / Variant</th>
+                  <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wide text-slate-400">Ex-showroom</th>
+                  <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wide text-slate-400">On-road (Jaipur est.)</th>
+                  <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wide text-slate-400">Fuel / Trans</th>
+                  <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wide text-slate-400">Schemes</th>
+                  <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wide text-slate-400">Brochure</th>
+                  <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-wide text-slate-400"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr><td colSpan={7} className="px-4 py-6 text-slate-400">Loading variants…</td></tr>
+                ) : filtered.length === 0 ? (
+                  <tr><td colSpan={7} className="px-4 py-6 text-slate-400">No variants match the filter.</td></tr>
+                ) : (
+                  filtered.map((v) => {
+                    const onRoad = v.ex_showroom_price + (v.insurance ?? 0) + (v.rto_standard ?? 0);
+                    const chips = schemeChips(v);
+                    return (
+                      <tr key={v.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 w-2 shrink-0 rounded-full" style={{ background: modelColor(v.model) }} />
+                            <div>
+                              <p className="font-semibold text-ink">{v.model}</p>
+                              <p className="text-[11px] text-slate-400">{v.variant_name}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-ink">{lakhFormat(v.ex_showroom_price)}</td>
+                        <td className="px-4 py-3 text-slate-600">{onRoad > 0 ? lakhFormat(onRoad) : "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">{[v.fuel_type, v.transmission].filter(Boolean).join(" · ")}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {chips.length === 0 ? (
+                              <span className="text-slate-300">—</span>
+                            ) : chips.map((c) => (
+                              <span key={c} className="rounded px-1.5 py-0.5 text-[9px] font-bold bg-indigo-50 text-indigo-600">{c}</span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          {v.brochure_url ? (
+                            <a
+                              href={v.brochure_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[11px] font-medium text-accent hover:underline"
+                            >
+                              View PDF
+                            </a>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            className="secondary-button text-[11px]"
+                            onClick={() => setEditing(v)}
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,54 +1,178 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { PageHeader } from "../components/common/PageHeader";
-import { Panel } from "../components/common/Panel";
-import { LeadStatusBadge } from "../components/leads/LeadStatusBadge";
-import { fetchAppUsers, fetchLeads } from "../lib/dashboardApi";
+import { useEffect, useRef, useState } from "react";
+import clsx from "clsx";
+import {
+  fetchAppUsers,
+  fetchConversationByLeadId,
+  fetchLeads,
+  fetchMessages,
+  updateLeadNotes,
+  updateLeadOwner,
+} from "../lib/dashboardApi";
 import { supabase } from "../lib/supabase";
 import { useDashboardStore } from "../store/useDashboardStore";
-import type { AppUserRecord, LeadRecord } from "../types";
+import type { ConversationRecord, LeadRecord, MessageRecord } from "../types";
 
-type ConversationSummaryRow = {
-  lead_id: string | null;
-  last_message_at: string | null;
-};
+/* ─── helpers ─────────────────────────────────────────────── */
 
-const kanbanColumns = [
-  { key: "new", label: "New" },
-  { key: "qualified", label: "Qualified" },
-  { key: "warm", label: "Interested" },
-  { key: "hot", label: "Hot" },
-  { key: "sold", label: "Sold" },
-  { key: "lost", label: "Lost" },
-] as const;
+function statusChipClass(status: string) {
+  const map: Record<string, string> = {
+    hot: "chip chip-hot",
+    warm: "chip chip-warm",
+    new: "chip chip-new",
+    qualified: "chip chip-qualified",
+    sold: "chip chip-sold",
+    lost: "chip chip-lost",
+  };
+  return map[status] ?? "chip chip-lost";
+}
+
+function avatarColors(name: string) {
+  const palettes = [
+    { bg: "bg-indigo-50", text: "text-indigo-600" },
+    { bg: "bg-rose-50",   text: "text-rose-600" },
+    { bg: "bg-emerald-50",text: "text-emerald-700" },
+    { bg: "bg-amber-50",  text: "text-amber-700" },
+    { bg: "bg-violet-50", text: "text-violet-700" },
+    { bg: "bg-sky-50",    text: "text-sky-700" },
+  ];
+  const idx = (name.charCodeAt(0) ?? 0) % palettes.length;
+  return palettes[idx];
+}
+
+function initials(name: string | null, phone: string) {
+  if (!name) return phone.slice(-2);
+  const parts = name.trim().split(" ");
+  return parts.length >= 2
+    ? `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+    : name.slice(0, 2).toUpperCase();
+}
+
+function relativeTime(iso: string | null | undefined) {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function formatMsgTime(iso: string) {
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatMsgDate(iso: string) {
+  const d = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
+/* ─── sub-components ──────────────────────────────────────── */
+
+function LeadRow({
+  lead,
+  lastMsgAt,
+  selected,
+  onClick,
+}: {
+  lead: LeadRecord;
+  lastMsgAt: string | null;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const name = lead.customer_name ?? lead.phone;
+  const av = avatarColors(name);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={clsx(
+        "flex w-full items-center gap-3 px-4 py-3 text-left transition-colors",
+        "border-b border-slate-100 hover:bg-slate-50",
+        selected && "bg-indigo-50/70 border-l-[3px] border-l-accent"
+      )}
+    >
+      {/* Avatar */}
+      <div
+        className={clsx(
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold",
+          av.bg, av.text
+        )}
+      >
+        {initials(lead.customer_name, lead.phone)}
+      </div>
+
+      {/* Info */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-1">
+          <span className="truncate text-[13px] font-semibold text-ink">{name}</span>
+          <span className="shrink-0 text-[10px] text-slate-400">{relativeTime(lastMsgAt)}</span>
+        </div>
+        <div className="mt-0.5 flex items-center gap-2">
+          <span className={statusChipClass(lead.lead_status)}>{lead.lead_status}</span>
+          {lead.interested_model && (
+            <span className="truncate text-[11px] text-slate-400">{lead.interested_model}</span>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function ChatBubble({ msg }: { msg: MessageRecord }) {
+  const isOut = msg.direction === "outbound";
+  return (
+    <div className={clsx("flex flex-col gap-0.5", isOut ? "items-end" : "items-start")}>
+      {isOut && <span className="ai-tag">AI reply</span>}
+      <div className={isOut ? "bubble-out" : "bubble-in"}>
+        {msg.content ?? "(no content)"}
+        <div className={isOut ? "bubble-time-out" : "bubble-time-in"}>
+          {formatMsgTime(msg.created_at)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── main page ───────────────────────────────────────────── */
 
 export function LeadsPage() {
-  const {
-    leadSearch,
-    leadStatusFilter,
-    setLeadSearch,
-    setLeadStatusFilter,
-    setSelectedLeadId,
-  } = useDashboardStore();
-  const [leads, setLeads] = useState<LeadRecord[]>([]);
-  const [kanbanLeads, setKanbanLeads] = useState<LeadRecord[]>([]);
-  const [users, setUsers] = useState<AppUserRecord[]>([]);
-  const [lastMessageByLeadId, setLastMessageByLeadId] = useState<
-    Record<string, string | null>
-  >({});
-  const [loading, setLoading] = useState(true);
-  const [isKanban, setIsKanban] = useState(false);
+  const { leadSearch, leadStatusFilter, setLeadSearch, setLeadStatusFilter } =
+    useDashboardStore();
 
+  const [leads, setLeads] = useState<LeadRecord[]>([]);
+  const [lastMsgMap, setLastMsgMap] = useState<Record<string, string | null>>({});
+  const [loading, setLoading] = useState(true);
+
+  // selected lead + its conversation/messages
+  const [selectedLead, setSelectedLead] = useState<LeadRecord | null>(null);
+  const [conversation, setConversation] = useState<ConversationRecord | null>(null);
+  const [messages, setMessages] = useState<MessageRecord[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
+
+  // lead detail panel (notes / assign)
+  const [notes, setNotes] = useState("");
+  const [ownerId, setOwnerId] = useState("");
+  const [users, setUsers] = useState<{ id: string; full_name: string | null }[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
+
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  /* load leads list */
   useEffect(() => {
     let cancelled = false;
-
     async function load() {
       setLoading(true);
       try {
-        const [leadRows, userRows, allLeadRows, conversationRowsResult] = await Promise.all([
+        const [leadRows, convRows] = await Promise.all([
           fetchLeads(leadSearch, leadStatusFilter),
-          fetchAppUsers(),
-          fetchLeads("", "all"),
           supabase
             .from("conversations")
             .select("lead_id, last_message_at")
@@ -56,273 +180,306 @@ export function LeadsPage() {
             .order("last_message_at", { ascending: false }),
         ]);
 
-        if (conversationRowsResult.error) {
-          throw conversationRowsResult.error;
-        }
+        if (convRows.error) throw convRows.error;
 
-        const nextLastMessageByLeadId: Record<string, string | null> = {};
-        for (const conversation of (conversationRowsResult.data ?? []) as ConversationSummaryRow[]) {
-          if (!conversation.lead_id || nextLastMessageByLeadId[conversation.lead_id]) {
-            continue;
-          }
-
-          nextLastMessageByLeadId[conversation.lead_id] = conversation.last_message_at;
+        const map: Record<string, string | null> = {};
+        for (const row of (convRows.data ?? []) as { lead_id: string; last_message_at: string | null }[]) {
+          if (row.lead_id && !map[row.lead_id]) map[row.lead_id] = row.last_message_at;
         }
 
         if (!cancelled) {
           setLeads(leadRows);
-          setUsers(userRows);
-          setKanbanLeads(allLeadRows);
-          setLastMessageByLeadId(nextLastMessageByLeadId);
+          setLastMsgMap(map);
         }
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       }
     }
-
     void load();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [leadSearch, leadStatusFilter]);
 
-  const userNameById = new Map(users.map((user) => [user.id, user.full_name ?? "Unassigned"]));
+  /* load users once */
+  useEffect(() => {
+    fetchAppUsers().then(setUsers).catch(console.error);
+  }, []);
+
+  /* load chat when lead is selected */
+  async function selectLead(lead: LeadRecord) {
+    setSelectedLead(lead);
+    setShowDetail(false);
+    setNotes(lead.notes ?? "");
+    setOwnerId(lead.assigned_to ?? "");
+    setChatLoading(true);
+    setMessages([]);
+    setConversation(null);
+    try {
+      const conv = await fetchConversationByLeadId(lead.id);
+      setConversation(conv);
+      if (conv) {
+        const msgs = await fetchMessages(conv.id);
+        setMessages(msgs);
+      }
+    } finally {
+      setChatLoading(false);
+    }
+  }
+
+  /* auto-scroll chat */
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  /* save lead edits */
+  async function handleSave() {
+    if (!selectedLead) return;
+    setSaving(true);
+    try {
+      await Promise.all([
+        updateLeadNotes(selectedLead.id, notes),
+        updateLeadOwner(selectedLead.id, ownerId || null),
+      ]);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /* group messages by date */
+  const groupedMessages: { date: string; msgs: MessageRecord[] }[] = [];
+  for (const msg of messages) {
+    const label = formatMsgDate(msg.created_at);
+    const last = groupedMessages[groupedMessages.length - 1];
+    if (last?.date === label) last.msgs.push(msg);
+    else groupedMessages.push({ date: label, msgs: [msg] });
+  }
+
+  const statusFilters = ["all", "new", "qualified", "warm", "hot", "sold", "lost"];
 
   return (
-    <div>
-      <PageHeader
-        title="Leads List"
-        description="Search, filter, and review customer leads from WhatsApp conversations."
-      />
-
-      <Panel>
-        <div className="flex flex-wrap gap-2">
-          <button
-            className={`rounded-full px-4 py-2 text-sm font-medium ${
-              !isKanban
-                ? "bg-ink text-white"
-                : "bg-slate-100 text-slate-700"
-            }`}
-            onClick={() => setIsKanban(false)}
-            type="button"
-          >
-            List View
-          </button>
-          <button
-            className={`rounded-full px-4 py-2 text-sm font-medium ${
-              isKanban
-                ? "bg-ink text-white"
-                : "bg-slate-100 text-slate-700"
-            }`}
-            onClick={() => setIsKanban(true)}
-            type="button"
-          >
-            Kanban View
-          </button>
+    <div className="flex h-screen flex-col overflow-hidden">
+      {/* ── Top bar ── */}
+      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3.5">
+        <div>
+          <h2 className="text-[16px] font-semibold text-ink">Leads</h2>
+          <p className="text-[11px] text-slate-400">
+            {loading ? "Loading…" : `${leads.length} leads`}
+            {leadStatusFilter !== "all" && ` · filtered by ${leadStatusFilter}`}
+          </p>
         </div>
-      </Panel>
-
-      {isKanban ? (
-        <div className="mt-6 overflow-x-auto pb-2">
-          {/* TODO Phase 2: add drag-and-drop to move leads between stages */}
-          <div className="grid min-w-[1200px] grid-cols-6 gap-4">
-            {kanbanColumns.map((column) => {
-              const columnLeads = kanbanLeads.filter((lead) =>
-                lead.lead_status === column.key
-              );
-
-              return (
-                <div
-                  key={column.key}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                >
-                  <div className="mb-4 flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-ink">{column.label}</h3>
-                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-500">
-                      {columnLeads.length}
-                    </span>
-                  </div>
-                  <div className="space-y-3">
-                    {loading ? (
-                      <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
-                        Loading leads...
-                      </div>
-                    ) : columnLeads.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-4 text-sm text-slate-400">
-                        No leads
-                      </div>
-                    ) : (
-                      columnLeads.map((lead) => (
-                        <Link
-                          key={lead.id}
-                          className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
-                          to={`/leads/${lead.id}`}
-                          onClick={() => setSelectedLeadId(lead.id)}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold text-ink">
-                                {lead.customer_name || lead.phone}
-                              </div>
-                              <div className="mt-1 text-xs text-slate-500">
-                                {[lead.interested_model, lead.fuel_type].filter(Boolean).join(" | ") || "Model not captured"}
-                              </div>
-                            </div>
-                            <span className={getKanbanStatusBadgeClass(lead.lead_status)}>
-                              {lead.lead_status}
-                            </span>
-                          </div>
-                          <div className="mt-3 text-xs text-slate-500">
-                            {formatRelativeTime(lastMessageByLeadId[lead.id])}
-                          </div>
-                        </Link>
-                      ))
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700">
+            Live
+          </span>
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#152033] text-[10px] font-semibold text-white">
+            TW
           </div>
         </div>
-      ) : (
-        <>
-          <Panel>
-            <div className="grid gap-4 md:grid-cols-[1fr_220px]">
-              <div>
-                <label className="field-label">Search by phone or customer name</label>
-                <input
-                  className="field-input"
-                  value={leadSearch}
-                  onChange={(event) => setLeadSearch(event.target.value)}
-                  placeholder="Search leads"
-                />
-              </div>
-              <div>
-                <label className="field-label">Lead status</label>
-                <select
-                  className="field-input"
-                  value={leadStatusFilter}
-                  onChange={(event) => setLeadStatusFilter(event.target.value)}
-                >
-                  <option value="all">All</option>
-                  <option value="new">New</option>
-                  <option value="qualified">Qualified</option>
-                  <option value="closed">Closed</option>
-                </select>
-              </div>
+      </header>
+
+      {/* ── Body: 3-column split ── */}
+      <div className="flex flex-1 overflow-hidden">
+
+        {/* Col 1 — Leads list */}
+        <div className="flex w-[260px] shrink-0 flex-col border-r border-slate-200 bg-white">
+          {/* Search */}
+          <div className="p-3">
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="#aab0be" strokeWidth="1.5">
+                <circle cx="5.5" cy="5.5" r="4" />
+                <path d="M9 9l2.5 2.5" />
+              </svg>
+              <input
+                className="w-full bg-transparent text-[12px] text-ink outline-none placeholder:text-slate-400"
+                placeholder="Search name or phone…"
+                value={leadSearch}
+                onChange={(e) => setLeadSearch(e.target.value)}
+              />
             </div>
-          </Panel>
-
-          <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-slate-500">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Customer</th>
-                  <th className="px-4 py-3 font-medium">Phone</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 font-medium">Assigned To</th>
-                  <th className="px-4 py-3 font-medium">Created At</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {loading ? (
-                  <tr>
-                    <td className="px-4 py-6 text-slate-500" colSpan={5}>
-                      Loading leads...
-                    </td>
-                  </tr>
-                ) : leads.length === 0 ? (
-                  <tr>
-                    <td className="px-4 py-6 text-slate-500" colSpan={5}>
-                      No leads found for the current filters.
-                    </td>
-                  </tr>
-                ) : (
-                  leads.map((lead) => (
-                    <tr key={lead.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-4">
-                        <Link
-                          className="font-medium text-ink hover:text-accent"
-                          to={`/leads/${lead.id}`}
-                          onClick={() => setSelectedLeadId(lead.id)}
-                        >
-                          {lead.customer_name ?? "Unnamed lead"}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-4 text-slate-600">{lead.phone}</td>
-                      <td className="px-4 py-4">
-                        <LeadStatusBadge status={lead.lead_status} />
-                      </td>
-                      <td className="px-4 py-4 text-slate-600">
-                        {lead.assigned_to ? userNameById.get(lead.assigned_to) ?? "Unknown" : "Unassigned"}
-                      </td>
-                      <td className="px-4 py-4 text-slate-600">
-                        {new Date(lead.created_at).toLocaleString()}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
           </div>
-        </>
-      )}
+
+          {/* Status filter pills */}
+          <div className="flex gap-1.5 overflow-x-auto px-3 pb-2 scrollbar-none">
+            {statusFilters.map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setLeadStatusFilter(f)}
+                className={clsx(
+                  "shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold capitalize transition",
+                  leadStatusFilter === f
+                    ? "bg-[#152033] text-white"
+                    : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                )}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
+
+          {/* Lead rows */}
+          <div className="flex-1 overflow-y-auto">
+            {loading ? (
+              <p className="p-4 text-[12px] text-slate-400">Loading leads…</p>
+            ) : leads.length === 0 ? (
+              <p className="p-4 text-[12px] text-slate-400">No leads found.</p>
+            ) : (
+              leads.map((lead) => (
+                <LeadRow
+                  key={lead.id}
+                  lead={lead}
+                  lastMsgAt={lastMsgMap[lead.id] ?? null}
+                  selected={selectedLead?.id === lead.id}
+                  onClick={() => void selectLead(lead)}
+                />
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Col 2 — WhatsApp chat */}
+        <div className="flex flex-1 flex-col bg-[#f9f9fc]">
+          {!selectedLead ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 text-slate-400">
+              <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="#cbd5e1" strokeWidth="1.5">
+                <path d="M20 4C11.2 4 4 11.2 4 20c0 2.8.7 5.4 2 7.7L4 36l8.5-2c2.2 1.2 4.7 1.9 7.5 1.9 8.8 0 16-7.2 16-16S28.8 4 20 4z"/>
+              </svg>
+              <p className="text-[13px]">Select a lead to view conversation</p>
+            </div>
+          ) : (
+            <>
+              {/* Chat header */}
+              <div className="flex items-center gap-3 border-b border-slate-200 bg-white px-5 py-3">
+                {(() => {
+                  const name = selectedLead.customer_name ?? selectedLead.phone;
+                  const av = avatarColors(name);
+                  return (
+                    <div className={clsx("flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold", av.bg, av.text)}>
+                      {initials(selectedLead.customer_name, selectedLead.phone)}
+                    </div>
+                  );
+                })()}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-semibold text-ink truncate">
+                    {selectedLead.customer_name ?? selectedLead.phone}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    {selectedLead.phone}
+                    {selectedLead.interested_model && ` · ${selectedLead.interested_model}`}
+                  </p>
+                </div>
+                <span className={statusChipClass(selectedLead.lead_status)}>
+                  {selectedLead.lead_status}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowDetail(!showDetail)}
+                  className="secondary-button text-[11px]"
+                >
+                  {showDetail ? "Hide profile" : "Profile"}
+                </button>
+              </div>
+
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto px-5 py-4">
+                {chatLoading ? (
+                  <p className="text-center text-[12px] text-slate-400">Loading messages…</p>
+                ) : messages.length === 0 ? (
+                  <p className="text-center text-[12px] text-slate-400">No messages yet in this conversation.</p>
+                ) : (
+                  <div className="flex flex-col gap-4">
+                    {groupedMessages.map(({ date, msgs }) => (
+                      <div key={date}>
+                        <div className="mb-3 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          {date}
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          {msgs.map((msg) => (
+                            <ChatBubble key={msg.id} msg={msg} />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    <div ref={chatEndRef} />
+                  </div>
+                )}
+              </div>
+
+              {/* Reply bar */}
+              <div className="flex items-center gap-3 border-t border-slate-200 bg-white px-5 py-3">
+                <input
+                  className="field-input flex-1 text-[12px]"
+                  placeholder="Reply manually (AI handles most messages)…"
+                  readOnly
+                />
+                <button type="button" className="action-button text-[12px]">Send</button>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Col 3 — Lead profile (slide in) */}
+        {showDetail && selectedLead && (
+          <div className="flex w-[240px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-slate-200 bg-white p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Lead profile</p>
+
+            {/* Quick info */}
+            <div className="flex flex-col gap-2">
+              {[
+                { label: "Phone", value: selectedLead.phone },
+                { label: "Status", value: selectedLead.lead_status },
+                { label: "Model", value: selectedLead.interested_model },
+                { label: "Fuel", value: selectedLead.fuel_type },
+                { label: "Transmission", value: selectedLead.transmission },
+                { label: "Exchange", value: selectedLead.exchange_required === null ? null : selectedLead.exchange_required ? "Yes" : "No" },
+                { label: "City", value: selectedLead.city },
+                { label: "Source", value: selectedLead.source },
+              ].map(({ label, value }) => (
+                <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                  <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+                  <p className="mt-0.5 text-[12px] text-ink">{value ?? "—"}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="h-px bg-slate-100" />
+
+            {/* Assign */}
+            <div>
+              <label className="field-label">Assign to</label>
+              <select
+                className="field-input text-[12px]"
+                value={ownerId}
+                onChange={(e) => setOwnerId(e.target.value)}
+              >
+                <option value="">Unassigned</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>{u.full_name ?? u.id}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Notes */}
+            <div>
+              <label className="field-label">Notes</label>
+              <textarea
+                className="field-input min-h-[80px] text-[12px]"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Sales team notes…"
+              />
+            </div>
+
+            <button
+              type="button"
+              className="action-button w-full text-[12px]"
+              disabled={saving}
+              onClick={() => void handleSave()}
+            >
+              {saving ? "Saving…" : "Save updates"}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
-}
-
-function formatRelativeTime(value: string | null | undefined): string {
-  if (!value) {
-    return "No messages yet";
-  }
-
-  const timestamp = new Date(value).getTime();
-
-  if (Number.isNaN(timestamp)) {
-    return "Unknown";
-  }
-
-  const diffMs = Date.now() - timestamp;
-  const diffMinutes = Math.max(1, Math.floor(diffMs / (1000 * 60)));
-
-  if (diffMinutes < 60) {
-    return `${diffMinutes}m ago`;
-  }
-
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) {
-    return `${diffHours}h ago`;
-  }
-
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 7) {
-    return `${diffDays}d ago`;
-  }
-
-  return new Date(value).toLocaleDateString();
-}
-
-function getKanbanStatusBadgeClass(status: string): string {
-  const baseClass =
-    "inline-flex rounded-full px-2.5 py-1 text-xs font-semibold capitalize";
-
-  if (status === "hot") {
-    return `${baseClass} bg-red-100 text-red-700`;
-  }
-
-  if (status === "warm") {
-    return `${baseClass} bg-orange-100 text-orange-700`;
-  }
-
-  if (status === "qualified") {
-    return `${baseClass} bg-blue-100 text-blue-700`;
-  }
-
-  if (status === "new") {
-    return `${baseClass} bg-slate-200 text-slate-700`;
-  }
-
-  return `${baseClass} bg-slate-100 text-slate-600`;
 }

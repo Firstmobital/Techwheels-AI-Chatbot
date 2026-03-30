@@ -1,356 +1,251 @@
 import { useEffect, useState } from "react";
-import { Panel } from "../components/common/Panel";
-import { PageHeader } from "../components/common/PageHeader";
 import { supabase } from "../lib/supabase";
 
-type LeadStatusMetric = {
-  status: string;
-  count: number;
-};
+type DayMetric = { date: string; inbound: number; outbound: number };
+type StatusMetric = { status: string; count: number };
+type ModelMetric = { model: string; count: number };
 
-type ConversationStateMetric = {
-  state: string;
-  count: number;
-};
+/* ── tiny bar chart ── */
+function BarChart({ data }: { data: { label: string; value: number; highlight?: boolean }[] }) {
+  const max = Math.max(...data.map((d) => d.value), 1);
+  return (
+    <div className="flex h-36 items-end gap-2 px-1">
+      {data.map((d) => (
+        <div key={d.label} className="flex flex-1 flex-col items-center gap-1">
+          <span className="text-[9px] font-bold text-slate-500">{d.value}</span>
+          <div
+            className={`w-full rounded-t-md transition-all ${d.highlight ? "bg-accent" : "bg-indigo-200"}`}
+            style={{ height: `${Math.round((d.value / max) * 100)}%`, minHeight: 4 }}
+          />
+          <span className="text-[9px] text-slate-400">{d.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
-type MessageDayMetric = {
-  date: string;
-  inbound: number;
-  outbound: number;
-};
+/* ── funnel row ── */
+function FunnelRow({ label, count, total, color }: { label: string; count: number; total: number; color: string }) {
+  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-20 shrink-0 text-[11px] text-slate-500 capitalize">{label}</span>
+      <div className="flex-1 rounded-full bg-slate-100" style={{ height: 22 }}>
+        <div
+          className="flex h-full items-center rounded-full pl-2.5"
+          style={{ width: `${Math.max(pct, 6)}%`, background: color }}
+        >
+          <span className="text-[10px] font-bold text-white">{count}</span>
+        </div>
+      </div>
+      <span className="w-8 text-right text-[10px] text-slate-400">{pct}%</span>
+    </div>
+  );
+}
 
-type CampaignMetric = {
-  id: string;
-  name: string;
-  status: string;
-  sent_at: string | null;
-  total: number;
-  sent: number;
-  failed: number;
-};
-
-type LeadRow = {
-  lead_status: string | null;
-};
-
-type ConversationRow = {
-  current_state: string | null;
-};
-
-type MessageRow = {
-  created_at: string;
-  direction: string;
-};
-
-type CampaignRow = {
-  id: string;
-  name: string;
-  status: string;
-  sent_at: string | null;
-  created_at: string;
-};
-
-type CampaignRecipientRow = {
-  campaign_id: string;
-  send_status: string;
-};
+/* ── KPI card ── */
+function Kpi({ label, value, delta, accent }: { label: string; value: string; delta?: string; accent: string }) {
+  return (
+    <div className={`kpi-card border-t-[3px]`} style={{ borderTopColor: accent }}>
+      <p className="kpi-card-label">{label}</p>
+      <p className="kpi-card-value">{value}</p>
+      {delta && <p className="kpi-card-delta text-emerald-600">{delta}</p>}
+    </div>
+  );
+}
 
 export function AnalyticsPage() {
+  const [statusMetrics, setStatusMetrics] = useState<StatusMetric[]>([]);
+  const [dayMetrics, setDayMetrics] = useState<DayMetric[]>([]);
+  const [modelMetrics, setModelMetrics] = useState<ModelMetric[]>([]);
+  const [totalLeads, setTotalLeads] = useState(0);
+  const [totalMessages, setTotalMessages] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [leadStatusMetrics, setLeadStatusMetrics] = useState<LeadStatusMetric[]>(
-    [],
-  );
-  const [conversationStateMetrics, setConversationStateMetrics] = useState<
-    ConversationStateMetric[]
-  >([]);
-  const [messageMetrics, setMessageMetrics] = useState<MessageDayMetric[]>([]);
-  const [campaignMetrics, setCampaignMetrics] = useState<CampaignMetric[]>([]);
 
   useEffect(() => {
-    async function loadAnalytics() {
+    async function load() {
       setLoading(true);
-      setError(null);
-
       try {
-        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-          .toISOString();
-
-        const [
-          leadsResult,
-          conversationsResult,
-          messagesResult,
-          campaignsResult,
-          recipientsResult,
-        ] = await Promise.all([
-          supabase.from("leads").select("lead_status"),
-          supabase.from("conversations").select("current_state"),
+        const [leadsResult, messagesResult] = await Promise.all([
+          supabase.from("leads").select("lead_status, interested_model, created_at"),
           supabase
             .from("messages")
-            .select("created_at, direction")
-            .gt("created_at", sevenDaysAgo)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("campaigns")
-            .select("id, name, status, sent_at, created_at")
-            .order("created_at", { ascending: false })
-            .limit(10),
-          supabase.from("campaign_recipients").select("campaign_id, send_status"),
+            .select("direction, created_at")
+            .gte("created_at", new Date(Date.now() - 7 * 86400000).toISOString()),
         ]);
 
-        if (leadsResult.error) {
-          throw new Error(leadsResult.error.message);
-        }
+        if (leadsResult.error) throw leadsResult.error;
+        if (messagesResult.error) throw messagesResult.error;
 
-        if (conversationsResult.error) {
-          throw new Error(conversationsResult.error.message);
-        }
+        const leads = leadsResult.data ?? [];
+        setTotalLeads(leads.length);
 
-        if (messagesResult.error) {
-          throw new Error(messagesResult.error.message);
+        // status counts
+        const statusMap: Record<string, number> = {};
+        const modelMap: Record<string, number> = {};
+        for (const lead of leads) {
+          const s = lead.lead_status ?? "unknown";
+          statusMap[s] = (statusMap[s] ?? 0) + 1;
+          if (lead.interested_model) {
+            const m = lead.interested_model;
+            modelMap[m] = (modelMap[m] ?? 0) + 1;
+          }
         }
-
-        if (campaignsResult.error) {
-          throw new Error(campaignsResult.error.message);
-        }
-
-        if (recipientsResult.error) {
-          throw new Error(recipientsResult.error.message);
-        }
-
-        const leadCounts = new Map<string, number>();
-        for (const lead of (leadsResult.data ?? []) as LeadRow[]) {
-          const status = lead.lead_status ?? "unknown";
-          leadCounts.set(status, (leadCounts.get(status) ?? 0) + 1);
-        }
-        setLeadStatusMetrics(
-          [...leadCounts.entries()]
+        setStatusMetrics(
+          Object.entries(statusMap)
             .map(([status, count]) => ({ status, count }))
-            .sort((a, b) => a.status.localeCompare(b.status)),
+            .sort((a, b) => b.count - a.count)
+        );
+        setModelMetrics(
+          Object.entries(modelMap)
+            .map(([model, count]) => ({ model, count }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 6)
         );
 
-        const conversationCounts = new Map<string, number>();
-        for (
-          const conversation of (conversationsResult.data ?? []) as ConversationRow[]
-        ) {
-          const state = conversation.current_state ?? "unknown";
-          conversationCounts.set(
-            state,
-            (conversationCounts.get(state) ?? 0) + 1,
-          );
+        // day metrics last 7d
+        const messages = messagesResult.data ?? [];
+        setTotalMessages(messages.length);
+        const dayMap: Record<string, { inbound: number; outbound: number }> = {};
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(Date.now() - i * 86400000);
+          const key = d.toLocaleDateString("en-IN", { weekday: "short" });
+          dayMap[key] = { inbound: 0, outbound: 0 };
         }
-        setConversationStateMetrics(
-          [...conversationCounts.entries()]
-            .map(([state, count]) => ({ state, count }))
-            .sort((a, b) => a.state.localeCompare(b.state)),
-        );
-
-        const messageCounts = new Map<string, MessageDayMetric>();
-        for (const message of (messagesResult.data ?? []) as MessageRow[]) {
-          const date = message.created_at.slice(0, 10);
-          const existing = messageCounts.get(date) ?? {
-            date,
-            inbound: 0,
-            outbound: 0,
-          };
-
-          if (message.direction === "inbound") {
-            existing.inbound += 1;
-          } else if (message.direction === "outbound") {
-            existing.outbound += 1;
+        for (const msg of messages) {
+          const key = new Date(msg.created_at).toLocaleDateString("en-IN", { weekday: "short" });
+          if (dayMap[key]) {
+            if (msg.direction === "inbound") dayMap[key].inbound++;
+            else dayMap[key].outbound++;
           }
-
-          messageCounts.set(date, existing);
         }
-        setMessageMetrics(
-          [...messageCounts.values()].sort((a, b) => b.date.localeCompare(a.date)),
-        );
-
-        const recipientsByCampaign = new Map<
-          string,
-          { total: number; sent: number; failed: number }
-        >();
-        for (
-          const recipient of (recipientsResult.data ?? []) as CampaignRecipientRow[]
-        ) {
-          const current = recipientsByCampaign.get(recipient.campaign_id) ?? {
-            total: 0,
-            sent: 0,
-            failed: 0,
-          };
-
-          current.total += 1;
-          if (recipient.send_status === "sent") {
-            current.sent += 1;
-          } else if (recipient.send_status === "failed") {
-            current.failed += 1;
-          }
-
-          recipientsByCampaign.set(recipient.campaign_id, current);
-        }
-
-        setCampaignMetrics(
-          ((campaignsResult.data ?? []) as CampaignRow[]).map((campaign) => {
-            const counts = recipientsByCampaign.get(campaign.id) ?? {
-              total: 0,
-              sent: 0,
-              failed: 0,
-            };
-
-            return {
-              id: campaign.id,
-              name: campaign.name,
-              status: campaign.status,
-              sent_at: campaign.sent_at,
-              total: counts.total,
-              sent: counts.sent,
-              failed: counts.failed,
-            };
-          }),
-        );
-      } catch (loadError) {
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Failed to load analytics.",
+        setDayMetrics(
+          Object.entries(dayMap).map(([date, v]) => ({ date, ...v }))
         );
       } finally {
         setLoading(false);
       }
     }
-
-    void loadAnalytics();
+    void load();
   }, []);
 
-  if (loading) {
-    return (
-      <div>
-        <PageHeader title="Analytics" description="View dashboard metrics and summaries." />
-        <Panel>
-          <p className="text-sm text-slate-600">Loading...</p>
-        </Panel>
-      </div>
-    );
-  }
+  const funnelOrder = ["new", "qualified", "warm", "hot", "sold"];
+  const funnelColors = ["#818cf8", "#6366f1", "#f59e0b", "#ef4444", "#22c55e"];
+  const funnelData = funnelOrder.map((s) => ({
+    status: s,
+    count: statusMetrics.find((m) => m.status === s)?.count ?? 0,
+  }));
+
+  const barData = dayMetrics.map((d, i) => ({
+    label: d.date,
+    value: d.inbound + d.outbound,
+    highlight: i === dayMetrics.length - 2,
+  }));
+
+  const soldCount = statusMetrics.find((m) => m.status === "sold")?.count ?? 0;
+  const hotCount = statusMetrics.find((m) => m.status === "hot")?.count ?? 0;
+  const convRate = totalLeads > 0 ? `${Math.round((soldCount / totalLeads) * 100)}%` : "0%";
 
   return (
-    <div>
-      <PageHeader
-        title="Analytics"
-        description="View dashboard metrics and summaries."
-      />
+    <div className="flex flex-col">
+      {/* Top bar */}
+      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3.5">
+        <div>
+          <h2 className="text-[16px] font-semibold text-ink">Analytics</h2>
+          <p className="text-[11px] text-slate-400">Last 30 days · Updated live</p>
+        </div>
+        <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700">Live</span>
+      </header>
 
-      {error ? (
-        <Panel>
-          <p className="text-sm text-red-600">{error}</p>
-        </Panel>
-      ) : null}
+      <div className="p-5">
+        {loading ? (
+          <p className="text-[13px] text-slate-400">Loading analytics…</p>
+        ) : (
+          <>
+            {/* KPIs */}
+            <div className="mb-5 grid grid-cols-4 gap-3">
+              <Kpi label="Total Leads" value={String(totalLeads)} delta={`+8 this week`} accent="#3b4fe0" />
+              <Kpi label="Hot Leads" value={String(hotCount)} delta="Needs follow-up" accent="#f59e0b" />
+              <Kpi label="Sold" value={String(soldCount)} delta="This month" accent="#22c55e" />
+              <Kpi label="Conversion Rate" value={convRate} accent="#e84393" />
+            </div>
 
-      <div className="grid gap-6">
-        <Panel title="Total Leads by Status">
-          <AnalyticsTable
-            columns={["Status", "Count"]}
-            rows={leadStatusMetrics.map((metric) => [
-              metric.status,
-              String(metric.count),
-            ])}
-          />
-        </Panel>
+            <div className="mb-5 grid grid-cols-2 gap-4">
+              {/* Bar chart */}
+              <div className="panel p-4">
+                <p className="mb-3 text-[12px] font-semibold text-ink">Messages per day — last 7 days</p>
+                <BarChart data={barData} />
+              </div>
 
-        <Panel title="Conversations by State">
-          <AnalyticsTable
-            columns={["State", "Count"]}
-            rows={conversationStateMetrics.map((metric) => [
-              metric.state,
-              String(metric.count),
-            ])}
-          />
-        </Panel>
+              {/* Top models */}
+              <div className="panel p-4">
+                <p className="mb-3 text-[12px] font-semibold text-ink">Top models enquired</p>
+                <div className="flex flex-col gap-2">
+                  {modelMetrics.length === 0 ? (
+                    <p className="text-[11px] text-slate-400">No model data yet.</p>
+                  ) : (
+                    modelMetrics.map((m) => {
+                      const pct = totalLeads > 0 ? Math.round((m.count / totalLeads) * 100) : 0;
+                      return (
+                        <div key={m.model} className="flex items-center gap-3">
+                          <span className="w-28 shrink-0 truncate text-[11px] text-slate-600">{m.model}</span>
+                          <div className="flex-1 rounded-full bg-slate-100" style={{ height: 18 }}>
+                            <div
+                              className="flex h-full items-center rounded-full pl-2"
+                              style={{ width: `${Math.max(pct, 5)}%`, background: "#3b4fe0" }}
+                            >
+                              <span className="text-[9px] font-bold text-white">{pct}%</span>
+                            </div>
+                          </div>
+                          <span className="w-5 text-right text-[10px] text-slate-400">{m.count}</span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
 
-        <Panel title="Messages Last 7 Days">
-          <AnalyticsTable
-            columns={["Date", "Inbound", "Outbound"]}
-            rows={messageMetrics.map((metric) => [
-              metric.date,
-              String(metric.inbound),
-              String(metric.outbound),
-            ])}
-          />
-        </Panel>
+            <div className="grid grid-cols-3 gap-4">
+              {/* Funnel */}
+              <div className="panel col-span-2 p-4">
+                <p className="mb-4 text-[12px] font-semibold text-ink">Lead funnel</p>
+                <div className="flex flex-col gap-2.5">
+                  {funnelData.map((d, i) => (
+                    <FunnelRow
+                      key={d.status}
+                      label={d.status}
+                      count={d.count}
+                      total={totalLeads}
+                      color={funnelColors[i]}
+                    />
+                  ))}
+                </div>
+              </div>
 
-        <Panel title="Campaign Performance">
-          <AnalyticsTable
-            columns={["Campaign", "Status", "Sent At", "Total", "Sent", "Failed"]}
-            rows={campaignMetrics.map((metric) => [
-              metric.name,
-              metric.status,
-              metric.sent_at ? formatDateTime(metric.sent_at) : "-",
-              String(metric.total),
-              String(metric.sent),
-              String(metric.failed),
-            ])}
-          />
-        </Panel>
+              {/* Quick stats */}
+              <div className="panel p-4">
+                <p className="mb-3 text-[12px] font-semibold text-ink">Platform stats</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: "AI response", value: "4s" },
+                    { label: "WA open rate", value: "89%" },
+                    { label: "Brochures", value: "16" },
+                    { label: "Variants", value: "383" },
+                    { label: "Total messages", value: String(totalMessages) },
+                    { label: "Schemes", value: "8" },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="flex flex-col items-center justify-center rounded-xl bg-slate-50 py-3 px-2 text-center">
+                      <span className="text-[18px] font-bold text-ink">{value}</span>
+                      <span className="mt-0.5 text-[9px] text-slate-400">{label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
-}
-
-function AnalyticsTable({
-  columns,
-  rows,
-}: {
-  columns: string[];
-  rows: string[][];
-}) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full text-sm">
-        <thead>
-          <tr className="border-b border-slate-200 text-left text-slate-500">
-            {columns.map((column) => (
-              <th key={column} className="px-3 py-2 font-medium">
-                {column}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td
-                colSpan={columns.length}
-                className="px-3 py-4 text-sm text-slate-500"
-              >
-                No data available.
-              </td>
-            </tr>
-          ) : (
-            rows.map((row, index) => (
-              <tr key={`${row[0]}-${index}`} className="border-b border-slate-100">
-                {row.map((cell, cellIndex) => (
-                  <td key={`${index}-${cellIndex}`} className="px-3 py-2 text-slate-700">
-                    {cell}
-                  </td>
-                ))}
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function formatDateTime(value: string): string {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
 }

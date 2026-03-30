@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { PageHeader } from "../components/common/PageHeader";
-import { Panel } from "../components/common/Panel";
 import {
   createCampaignWithRecipients,
   fetchCampaignRecipients,
@@ -20,10 +18,58 @@ type ParsedRecipient = {
   variables: Record<string, unknown> | null;
 };
 
+function parseManualRecipients(text: string): ParsedRecipient[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [phone, name] = line.split(",").map((s) => s.trim());
+      return { phone: phone ?? "", customer_name: name ?? null, variables: null };
+    })
+    .filter((r) => r.phone.length >= 10);
+}
+
+function parseCsvRecipients(csv: string): ParsedRecipient[] {
+  const lines = csv.split("\n").map((l) => l.trim()).filter(Boolean);
+  const [header, ...rows] = lines;
+  if (!header) return [];
+  const cols = header.split(",").map((c) => c.trim().toLowerCase());
+  const phoneIdx = cols.indexOf("phone");
+  const nameIdx = cols.indexOf("customer_name");
+  if (phoneIdx === -1) return [];
+  return rows.map((row) => {
+    const cells = row.split(",");
+    return {
+      phone: cells[phoneIdx]?.trim() ?? "",
+      customer_name: nameIdx !== -1 ? cells[nameIdx]?.trim() ?? null : null,
+      variables: null,
+    };
+  }).filter((r) => r.phone.length >= 10);
+}
+
+function statusBadge(status: string) {
+  const map: Record<string, string> = {
+    sent: "chip chip-sold",
+    draft: "chip chip-lost",
+    sending: "chip chip-warm",
+    failed: "chip chip-hot",
+    pending: "chip chip-new",
+  };
+  return map[status] ?? "chip chip-lost";
+}
+
+function recipientBadge(status: string) {
+  if (status === "sent") return "chip chip-sold";
+  if (status === "failed") return "chip chip-hot";
+  if (status === "pending") return "chip chip-new";
+  return "chip chip-lost";
+}
+
 export function CampaignSenderPage() {
   const [templates, setTemplates] = useState<CampaignTemplateRecord[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignRecord[]>([]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string>("");
+  const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [campaignRecipients, setCampaignRecipients] = useState<CampaignRecipientRecord[]>([]);
   const [campaignName, setCampaignName] = useState("");
   const [templateId, setTemplateId] = useState("");
@@ -34,327 +80,251 @@ export function CampaignSenderPage() {
   const [sending, setSending] = useState(false);
 
   async function loadCampaignData() {
-    const [templateRows, campaignRows] = await Promise.all([
-      fetchCampaignTemplates(),
-      fetchCampaigns(),
-    ]);
-    setTemplates(templateRows);
-    setCampaigns(campaignRows);
+    const [tRows, cRows] = await Promise.all([fetchCampaignTemplates(), fetchCampaigns()]);
+    setTemplates(tRows);
+    setCampaigns(cRows);
   }
 
-  useEffect(() => {
-    void loadCampaignData();
-  }, []);
+  useEffect(() => { void loadCampaignData(); }, []);
 
   useEffect(() => {
     let cancelled = false;
-
     async function loadRecipients() {
-      if (!selectedCampaignId) {
-        setCampaignRecipients([]);
-        return;
-      }
-
-      const recipientRows = await fetchCampaignRecipients(selectedCampaignId);
-      if (!cancelled) {
-        setCampaignRecipients(recipientRows);
-      }
+      if (!selectedCampaignId) { setCampaignRecipients([]); return; }
+      const rows = await fetchCampaignRecipients(selectedCampaignId);
+      if (!cancelled) setCampaignRecipients(rows);
     }
-
     void loadRecipients();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [selectedCampaignId]);
 
   const parsedRecipients = useMemo(
-    () =>
-      recipientSource === "manual"
-        ? parseManualRecipients(manualRecipients)
-        : parseCsvRecipients(csvText),
-    [recipientSource, manualRecipients, csvText],
+    () => recipientSource === "manual" ? parseManualRecipients(manualRecipients) : parseCsvRecipients(csvText),
+    [recipientSource, manualRecipients, csvText]
   );
 
-  async function handleCreateCampaign() {
-    if (!campaignName || !templateId || parsedRecipients.length === 0) {
-      return;
-    }
-
+  async function handleCreate() {
+    if (!campaignName || !templateId || parsedRecipients.length === 0) return;
     setSaving(true);
     try {
-      const createdCampaign = await createCampaignWithRecipients({
-        name: campaignName,
-        template_id: templateId,
-        recipient_source: recipientSource,
-        payload: {
-          upload_mode: recipientSource,
-        },
-        recipients: parsedRecipients,
+      const created = await createCampaignWithRecipients({
+        name: campaignName, template_id: templateId, recipient_source: recipientSource,
+        payload: { upload_mode: recipientSource }, recipients: parsedRecipients,
       });
-
-      setCampaignName("");
-      setTemplateId("");
-      setManualRecipients("");
-      setCsvText("");
-      setSelectedCampaignId(createdCampaign.id);
+      setCampaignName(""); setTemplateId(""); setManualRecipients(""); setCsvText("");
+      setSelectedCampaignId(created.id);
       await loadCampaignData();
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }
 
-  async function handleSendCampaign() {
-    if (!selectedCampaignId) {
-      return;
-    }
-
+  async function handleSend() {
+    if (!selectedCampaignId) return;
     setSending(true);
     try {
       await sendCampaign(selectedCampaignId);
       await loadCampaignData();
-      const recipientRows = await fetchCampaignRecipients(selectedCampaignId);
-      setCampaignRecipients(recipientRows);
-    } finally {
-      setSending(false);
-    }
+      setCampaignRecipients(await fetchCampaignRecipients(selectedCampaignId));
+    } finally { setSending(false); }
   }
+
+  const selectedCampaign = campaigns.find((c) => c.id === selectedCampaignId);
+
+  const sentCount = campaignRecipients.filter((r) => r.send_status === "sent").length;
+  const failedCount = campaignRecipients.filter((r) => r.send_status === "failed").length;
+  const pendingCount = campaignRecipients.filter((r) => r.send_status === "pending").length;
 
   return (
-    <div>
-      <PageHeader
-        title="Campaign Sender"
-        description="Create a simple campaign, attach recipients, and send an approved WhatsApp template."
-      />
+    <div className="flex flex-col">
+      {/* Top bar */}
+      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3.5">
+        <div>
+          <h2 className="text-[16px] font-semibold text-ink">Campaigns</h2>
+          <p className="text-[11px] text-slate-400">{campaigns.length} campaigns · {templates.length} approved templates</p>
+        </div>
+      </header>
 
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <Panel
-          title="Campaign Setup"
-          description="Phase 1 campaign form with manual list or CSV-style text input."
-        >
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="field-label">Campaign name</label>
-              <input
-                className="field-input"
-                value={campaignName}
-                onChange={(event) => setCampaignName(event.target.value)}
-                placeholder="Weekend exchange push"
-              />
-            </div>
-            <div>
-              <label className="field-label">Template selection</label>
-              <select
-                className="field-input"
-                value={templateId}
-                onChange={(event) => setTemplateId(event.target.value)}
-              >
-                <option value="">Select template</option>
-                {templates.map((template) => (
-                  <option key={template.id} value={template.id}>
-                    {template.template_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="field-label">Recipient input mode</label>
-              <select
-                className="field-input"
-                value={recipientSource}
-                onChange={(event) =>
-                  setRecipientSource(event.target.value as "manual" | "csv")}
-              >
-                <option value="manual">Manual list</option>
-                <option value="csv">CSV text</option>
-              </select>
-            </div>
-            <div className="md:col-span-2">
-              <label className="field-label">
-                {recipientSource === "manual"
-                  ? "Manual recipients"
-                  : "CSV upload text"}
-              </label>
-              <textarea
-                className="field-input min-h-40"
-                value={recipientSource === "manual" ? manualRecipients : csvText}
-                onChange={(event) =>
-                  recipientSource === "manual"
-                    ? setManualRecipients(event.target.value)
-                    : setCsvText(event.target.value)}
-                placeholder={
-                  recipientSource === "manual"
-                    ? "919876543210,Rahul Sharma,Hyundai Creta\n919812345678,Neha Singh,Kia Seltos"
-                    : "phone,customer_name,var1,var2\n919876543210,Rahul Sharma,Hyundai Creta,SX"
-                }
-              />
-            </div>
-          </div>
+      <div className="p-5">
+        <div className="grid grid-cols-2 gap-5">
 
-          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <div className="text-sm font-medium text-ink">Recipient preview</div>
-            <div className="mt-2 text-sm text-slate-600">
-              {parsedRecipients.length} recipient(s) parsed
-            </div>
-            <div className="mt-3 space-y-2 text-sm text-slate-600">
-              {parsedRecipients.slice(0, 5).map((recipient) => (
-                <div key={`${recipient.phone}-${recipient.customer_name}`}>
-                  {recipient.phone} • {recipient.customer_name ?? "No name"}
+          {/* ── Left: Create ── */}
+          <div className="flex flex-col gap-4">
+            <div className="panel p-5">
+              <p className="mb-4 text-[13px] font-semibold text-ink">Create new campaign</p>
+
+              <div className="flex flex-col gap-3">
+                <div>
+                  <label className="field-label">Campaign name</label>
+                  <input className="field-input text-[12px]" placeholder="e.g. Nexon EV March Offer" value={campaignName} onChange={(e) => setCampaignName(e.target.value)} />
                 </div>
-              ))}
-            </div>
-          </div>
 
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button
-              className="action-button"
-              disabled={saving || !campaignName || !templateId || parsedRecipients.length === 0}
-              onClick={() => void handleCreateCampaign()}
-            >
-              {saving ? "Saving..." : "Create Campaign"}
-            </button>
-            <button
-              className="secondary-button"
-              disabled={sending || !selectedCampaignId}
-              onClick={() => void handleSendCampaign()}
-            >
-              {sending ? "Sending..." : "Send Campaign"}
-            </button>
-          </div>
-        </Panel>
+                <div>
+                  <label className="field-label">WhatsApp template</label>
+                  <select className="field-input text-[12px]" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+                    <option value="">Select a template…</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>{t.template_name}</option>
+                    ))}
+                  </select>
+                </div>
 
-        <Panel title="Approved Templates">
-          <div className="space-y-3">
-            {templates.length === 0 ? (
-              <div className="text-sm text-slate-500">
-                No active campaign templates found.
-              </div>
-            ) : (
-              templates.map((template) => (
-                <div key={template.id} className="rounded-xl border border-slate-200 p-4">
-                  <div className="font-medium text-ink">{template.template_name}</div>
-                  <div className="mt-1 text-xs uppercase tracking-wide text-slate-500">
-                    {template.category} • {template.language_code}
+                {templateId && templates.find((t) => t.id === templateId)?.body_example && (
+                  <div className="rounded-xl bg-emerald-50 p-3">
+                    <p className="mb-1 text-[9px] font-bold uppercase tracking-wide text-emerald-600">Message preview</p>
+                    <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-slate-700">
+                      {templates.find((t) => t.id === templateId)?.body_example}
+                    </p>
                   </div>
-                  <p className="mt-2 text-sm text-slate-600">
-                    {template.body_example ?? "No example body saved."}
-                  </p>
-                </div>
-              ))
-            )}
-          </div>
-        </Panel>
-      </div>
+                )}
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-        <Panel title="Recent Campaigns">
-          <div className="space-y-3">
-            {campaigns.length === 0 ? (
-              <div className="text-sm text-slate-500">No campaigns created yet.</div>
-            ) : (
-              campaigns.map((campaign) => (
+                <div>
+                  <label className="field-label">Recipients</label>
+                  <div className="mb-2 flex gap-2">
+                    {(["manual", "csv"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setRecipientSource(mode)}
+                        className={`rounded-lg px-3 py-1.5 text-[11px] font-semibold capitalize transition ${
+                          recipientSource === mode ? "bg-[#152033] text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                        }`}
+                      >
+                        {mode === "manual" ? "Manual entry" : "CSV paste"}
+                      </button>
+                    ))}
+                  </div>
+
+                  {recipientSource === "manual" ? (
+                    <>
+                      <textarea
+                        className="field-input min-h-[100px] font-mono text-[12px]"
+                        placeholder={"One per line: phone, name\n+919829000001, Ravi Sharma\n+919929000002, Priya Singh"}
+                        value={manualRecipients}
+                        onChange={(e) => setManualRecipients(e.target.value)}
+                      />
+                      {parsedRecipients.length > 0 && (
+                        <p className="mt-1 text-[11px] text-emerald-600">{parsedRecipients.length} recipients parsed</p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <textarea
+                        className="field-input min-h-[100px] font-mono text-[12px]"
+                        placeholder={"phone,customer_name\n+919829000001,Ravi Sharma"}
+                        value={csvText}
+                        onChange={(e) => setCsvText(e.target.value)}
+                      />
+                      {parsedRecipients.length > 0 && (
+                        <p className="mt-1 text-[11px] text-emerald-600">{parsedRecipients.length} recipients parsed</p>
+                      )}
+                    </>
+                  )}
+                </div>
+
                 <button
-                  key={campaign.id}
-                  className={`w-full rounded-xl border p-4 text-left ${
-                    selectedCampaignId === campaign.id
-                      ? "border-accent bg-accentSoft"
-                      : "border-slate-200 bg-white"
-                  }`}
-                  onClick={() => setSelectedCampaignId(campaign.id)}
+                  type="button"
+                  className="action-button w-full text-[12px]"
+                  disabled={saving || !campaignName || !templateId || parsedRecipients.length === 0}
+                  onClick={() => void handleCreate()}
                 >
-                  <div className="font-medium text-ink">{campaign.name}</div>
-                  <div className="mt-1 text-xs uppercase tracking-wide text-slate-500">
-                    {campaign.status} • {campaign.recipient_source}
-                  </div>
-                  <div className="mt-2 text-sm text-slate-600">
-                    Created {new Date(campaign.created_at).toLocaleString()}
-                  </div>
+                  {saving ? "Creating…" : `Create campaign (${parsedRecipients.length} recipients)`}
                 </button>
-              ))
+              </div>
+            </div>
+          </div>
+
+          {/* ── Right: View & Send ── */}
+          <div className="flex flex-col gap-4">
+            <div className="panel p-5">
+              <p className="mb-3 text-[13px] font-semibold text-ink">Campaign history</p>
+
+              {campaigns.length === 0 ? (
+                <p className="text-[12px] text-slate-400">No campaigns yet.</p>
+              ) : (
+                <div className="flex flex-col divide-y divide-slate-100">
+                  {campaigns.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setSelectedCampaignId(c.id)}
+                      className={`flex items-center justify-between gap-3 py-3 text-left transition-colors hover:bg-slate-50 px-2 -mx-2 rounded-xl ${
+                        selectedCampaignId === c.id ? "bg-indigo-50/60" : ""
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-[12px] font-semibold text-ink">{c.name}</p>
+                        <p className="text-[10px] text-slate-400">
+                          {new Date(c.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                        </p>
+                      </div>
+                      <span className={statusBadge(c.status)}>{c.status}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {selectedCampaign && (
+              <div className="panel p-5">
+                <div className="mb-4 flex items-start justify-between">
+                  <div>
+                    <p className="text-[13px] font-semibold text-ink">{selectedCampaign.name}</p>
+                    <span className={`mt-1 ${statusBadge(selectedCampaign.status)}`}>{selectedCampaign.status}</span>
+                  </div>
+                  {selectedCampaign.status === "draft" && (
+                    <button
+                      type="button"
+                      className="action-button text-[12px]"
+                      disabled={sending}
+                      onClick={() => void handleSend()}
+                    >
+                      {sending ? "Sending…" : `Send to ${campaignRecipients.length} recipients`}
+                    </button>
+                  )}
+                </div>
+
+                {/* Stats */}
+                {campaignRecipients.length > 0 && (
+                  <>
+                    <div className="mb-3 grid grid-cols-3 gap-2">
+                      {[
+                        { label: "Sent", value: sentCount, color: "text-emerald-600" },
+                        { label: "Pending", value: pendingCount, color: "text-indigo-600" },
+                        { label: "Failed", value: failedCount, color: "text-red-600" },
+                      ].map(({ label, value, color }) => (
+                        <div key={label} className="flex flex-col items-center rounded-xl bg-slate-50 py-3">
+                          <span className={`text-[20px] font-bold ${color}`}>{value}</span>
+                          <span className="text-[10px] text-slate-400">{label}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="max-h-[200px] overflow-y-auto rounded-xl border border-slate-100">
+                      <table className="w-full text-[11px]">
+                        <thead className="sticky top-0 bg-slate-50">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-semibold text-slate-400">Phone</th>
+                            <th className="px-3 py-2 text-left font-semibold text-slate-400">Name</th>
+                            <th className="px-3 py-2 text-left font-semibold text-slate-400">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {campaignRecipients.map((r) => (
+                            <tr key={r.id}>
+                              <td className="px-3 py-2 font-mono text-slate-600">{r.phone}</td>
+                              <td className="px-3 py-2 text-slate-600">{r.customer_name ?? "—"}</td>
+                              <td className="px-3 py-2"><span className={recipientBadge(r.send_status)}>{r.send_status}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
-        </Panel>
-
-        <Panel title="Campaign Recipients">
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-slate-500">
-                  <th className="px-3 py-2 font-medium">Phone</th>
-                  <th className="px-3 py-2 font-medium">Name</th>
-                  <th className="px-3 py-2 font-medium">Status</th>
-                  <th className="px-3 py-2 font-medium">Error</th>
-                </tr>
-              </thead>
-              <tbody>
-                {campaignRecipients.map((recipient) => (
-                  <tr key={recipient.id} className="border-b border-slate-100">
-                    <td className="px-3 py-2">{recipient.phone}</td>
-                    <td className="px-3 py-2">{recipient.customer_name ?? "No name"}</td>
-                    <td className="px-3 py-2 capitalize">{recipient.send_status}</td>
-                    <td className="px-3 py-2 text-rose-600">
-                      {recipient.error_message ?? "-"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
+        </div>
       </div>
     </div>
-  );
-}
-
-function parseManualRecipients(input: string): ParsedRecipient[] {
-  return input
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [phone, customerName, var1, var2] = line.split(",").map((value) =>
-        value.trim()
-      );
-
-      return {
-        phone,
-        customer_name: customerName || null,
-        variables: buildRecipientVariables([var1, var2]),
-      };
-    })
-    .filter((recipient) => recipient.phone.length > 0);
-}
-
-function parseCsvRecipients(input: string): ParsedRecipient[] {
-  const lines = input
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  if (lines.length <= 1) {
-    return [];
-  }
-
-  return lines.slice(1).map((line) => {
-    const [phone, customerName, ...variables] = line.split(",").map((value) =>
-      value.trim()
-    );
-
-    return {
-      phone,
-      customer_name: customerName || null,
-      variables: buildRecipientVariables(variables),
-    };
-  }).filter((recipient) => recipient.phone.length > 0);
-}
-
-function buildRecipientVariables(values: string[]): Record<string, unknown> | null {
-  const filteredValues = values.filter((value) => value.length > 0);
-
-  if (filteredValues.length === 0) {
-    return null;
-  }
-
-  return Object.fromEntries(
-    filteredValues.map((value, index) => [`var${index + 1}`, value]),
   );
 }

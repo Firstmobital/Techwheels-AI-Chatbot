@@ -3,8 +3,11 @@
 @tailwind utilities;
 
 :root {
+  --ink: #152033;
+  --accent: #3b4fe0;
+  --paper: #f4f5f9;
   color: #152033;
-  background: #f6f7fb;
+  background: #f4f5f9;
   font-family: "Segoe UI", "Helvetica Neue", sans-serif;
 }
 
@@ -18,22 +21,67 @@ body {
   min-height: 100vh;
 }
 
-.panel {
-  @apply rounded-2xl bg-white shadow-panel;
-}
-
+/* ── Shared field/button primitives ── */
 .field-label {
-  @apply mb-2 block text-sm font-medium text-slate-600;
+  @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
 }
 
 .field-input {
-  @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10;
+  @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-ink outline-none transition
+    focus:border-accent focus:ring-2 focus:ring-accent/10;
 }
 
 .action-button {
-  @apply rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50;
+  @apply rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white transition
+    hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50;
 }
 
 .secondary-button {
   @apply rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50;
+}
+
+/* ── Panel ── */
+.panel {
+  @apply rounded-2xl border border-slate-200 bg-white;
+}
+
+/* ── Status chips ── */
+.chip {
+  @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+}
+.chip-hot    { @apply bg-red-50   text-red-700; }
+.chip-warm   { @apply bg-orange-50 text-orange-700; }
+.chip-new    { @apply bg-indigo-50 text-indigo-700; }
+.chip-qualified { @apply bg-blue-50 text-blue-700; }
+.chip-sold   { @apply bg-green-50  text-green-700; }
+.chip-lost   { @apply bg-slate-100 text-slate-500; }
+
+/* ── KPI card ── */
+.kpi-card {
+  @apply rounded-2xl border border-slate-200 bg-white px-5 py-4;
+}
+.kpi-card-label {
+  @apply text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1.5;
+}
+.kpi-card-value {
+  @apply text-3xl font-bold text-ink leading-none;
+}
+.kpi-card-delta {
+  @apply mt-2 text-xs font-medium;
+}
+
+/* ── Chat bubbles ── */
+.bubble-in {
+  @apply max-w-[78%] self-start rounded-tl-sm rounded-tr-2xl rounded-br-2xl rounded-bl-2xl
+    border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-ink leading-relaxed;
+}
+.bubble-out {
+  @apply max-w-[78%] self-end rounded-tl-2xl rounded-tr-sm rounded-br-2xl rounded-bl-2xl
+    bg-accent px-3.5 py-2.5 text-sm text-white leading-relaxed;
+}
+.bubble-time-in  { @apply mt-1 text-right text-[10px] text-slate-400; }
+.bubble-time-out { @apply mt-1 text-right text-[10px] text-indigo-200; }
+.ai-tag {
+  @apply mb-1 inline-block self-end rounded px-1.5 py-0.5 text-[10px] font-bold
+    bg-indigo-50 text-indigo-500 tracking-wide;
 }

@@ -1,100 +1,87 @@
-import { FormEvent, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
 export function LoginPage() {
-  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
-    setErrorMessage(null);
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      console.error("[dashboard-auth] Failed to sign in", {
-        email,
-        error,
-      });
-      setErrorMessage(error.message);
-      setSubmitting(false);
-      return;
+  async function handleLogin() {
+    if (!email || !password) { setError("Please enter email and password."); return; }
+    setLoading(true);
+    setError(null);
+    try {
+      const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
+      if (authError) { setError(authError.message); return; }
+      navigate("/leads");
+    } finally {
+      setLoading(false);
     }
-
-    navigate("/leads");
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-paper px-4 py-10 text-ink">
-      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-panel">
-        <div className="mb-8">
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-500">
-            Techwheels
-          </p>
-          <h1 className="mt-3 text-3xl font-semibold">Dashboard Login</h1>
-          <p className="mt-2 text-sm text-slate-600">
-            Sign in to access leads, conversations, pricing inputs, and
-            campaigns.
-          </p>
+    <div className="flex min-h-screen items-center justify-center bg-[#f4f5f9]">
+      <div className="w-full max-w-sm">
+        {/* Brand */}
+        <div className="mb-8 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#152033]">
+            <span className="text-[14px] font-bold text-white">TW</span>
+          </div>
+          <h1 className="text-xl font-bold text-ink">Techwheels Dashboard</h1>
+          <p className="mt-1 text-[12px] text-slate-400">AI Sales Platform · Tata Motors Jaipur</p>
         </div>
 
-        <form className="space-y-5" onSubmit={handleSubmit}>
-          <div>
-            <label className="field-label" htmlFor="email">
-              Email
-            </label>
-            <input
-              id="email"
-              className="field-input"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              required
-            />
-          </div>
+        {/* Card */}
+        <div className="panel p-7">
+          <p className="mb-5 text-[14px] font-semibold text-ink">Sign in to your account</p>
 
-          <div>
-            <label className="field-label" htmlFor="password">
-              Password
-            </label>
-            <input
-              id="password"
-              className="field-input"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Enter your password"
-              autoComplete="current-password"
-              required
-            />
-          </div>
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="field-label">Email address</label>
+              <input
+                className="field-input"
+                type="email"
+                placeholder="you@techwheels.in"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void handleLogin(); }}
+              />
+            </div>
+            <div>
+              <label className="field-label">Password</label>
+              <input
+                className="field-input"
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void handleLogin(); }}
+              />
+            </div>
 
-          {errorMessage
-            ? (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {errorMessage}
+            {error && (
+              <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-[12px] text-red-700">
+                {error}
               </div>
-            )
-            : null}
+            )}
 
-          <button
-            className="action-button w-full"
-            disabled={submitting}
-            type="submit"
-          >
-            {submitting ? "Logging in..." : "Login"}
-          </button>
-        </form>
+            <button
+              type="button"
+              className="action-button w-full py-2.5 text-[13px]"
+              disabled={loading}
+              onClick={() => void handleLogin()}
+            >
+              {loading ? "Signing in…" : "Sign in"}
+            </button>
+          </div>
+        </div>
+
+        <p className="mt-4 text-center text-[11px] text-slate-400">
+          Techwheels Tata Motors · Jaipur · Phase 1
+        </p>
       </div>
     </div>
   );
