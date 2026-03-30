@@ -50,22 +50,6 @@ CREATE TABLE IF NOT EXISTS "public"."app_users" (
 ALTER TABLE "public"."app_users" OWNER TO "postgres";
 
 
-CREATE TABLE IF NOT EXISTS "public"."brochures" (
-    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "model" "text" NOT NULL,
-    "file_name" "text" NOT NULL,
-    "storage_path" "text" NOT NULL,
-    "public_url" "text",
-    "version" "text",
-    "is_active" boolean DEFAULT true NOT NULL,
-    "uploaded_by" "uuid",
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
-);
-
-
-ALTER TABLE "public"."brochures" OWNER TO "postgres";
-
-
 CREATE TABLE IF NOT EXISTS "public"."campaign_recipients" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "campaign_id" "uuid" NOT NULL,
@@ -172,28 +156,6 @@ CREATE TABLE IF NOT EXISTS "public"."messages" (
 ALTER TABLE "public"."messages" OWNER TO "postgres";
 
 
-CREATE TABLE IF NOT EXISTS "public"."pricing_rules" (
-    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "model" "text",
-    "variant_id" "uuid",
-    "rule_type" "text" NOT NULL,
-    "rule_name" "text" NOT NULL,
-    "value_type" "text" NOT NULL,
-    "value" numeric(12,2) NOT NULL,
-    "is_stackable" boolean DEFAULT false NOT NULL,
-    "conditions" "jsonb",
-    "is_active" boolean DEFAULT true NOT NULL,
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    CONSTRAINT "pricing_rules_check" CHECK ((("model" IS NOT NULL) OR ("variant_id" IS NOT NULL))),
-    CONSTRAINT "pricing_rules_value_check" CHECK (("value" >= (0)::numeric)),
-    CONSTRAINT "pricing_rules_value_type_check" CHECK (("value_type" = ANY (ARRAY['fixed'::"text", 'percent'::"text"])))
-);
-
-
-ALTER TABLE "public"."pricing_rules" OWNER TO "postgres";
-
-
 CREATE TABLE IF NOT EXISTS "public"."variants" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "model" "text" NOT NULL,
@@ -227,11 +189,6 @@ ALTER TABLE "public"."variants" OWNER TO "postgres";
 
 ALTER TABLE ONLY "public"."app_users"
     ADD CONSTRAINT "app_users_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."brochures"
-    ADD CONSTRAINT "brochures_pkey" PRIMARY KEY ("id");
 
 
 
@@ -275,11 +232,6 @@ ALTER TABLE ONLY "public"."messages"
 
 
 
-ALTER TABLE ONLY "public"."pricing_rules"
-    ADD CONSTRAINT "pricing_rules_pkey" PRIMARY KEY ("id");
-
-
-
 ALTER TABLE ONLY "public"."variants"
     ADD CONSTRAINT "variants_model_variant_name_fuel_type_transmission_key" UNIQUE ("model", "variant_name", "fuel_type", "transmission");
 
@@ -295,10 +247,6 @@ CREATE INDEX "idx_app_users_phone" ON "public"."app_users" USING "btree" ("phone
 
 
 CREATE INDEX "idx_app_users_role" ON "public"."app_users" USING "btree" ("role");
-
-
-
-CREATE INDEX "idx_brochures_model_active" ON "public"."brochures" USING "btree" ("model", "is_active");
 
 
 
@@ -382,18 +330,6 @@ CREATE INDEX "idx_messages_whatsapp_message_id" ON "public"."messages" USING "bt
 
 
 
-CREATE INDEX "idx_pricing_rules_model_active" ON "public"."pricing_rules" USING "btree" ("model", "is_active");
-
-
-
-CREATE INDEX "idx_pricing_rules_rule_type" ON "public"."pricing_rules" USING "btree" ("rule_type");
-
-
-
-CREATE INDEX "idx_pricing_rules_variant_active" ON "public"."pricing_rules" USING "btree" ("variant_id", "is_active");
-
-
-
 CREATE INDEX "idx_variants_filters" ON "public"."variants" USING "btree" ("model", "fuel_type", "transmission", "is_active");
 
 
@@ -418,21 +354,12 @@ CREATE OR REPLACE TRIGGER "set_leads_updated_at" BEFORE UPDATE ON "public"."lead
 
 
 
-CREATE OR REPLACE TRIGGER "set_pricing_rules_updated_at" BEFORE UPDATE ON "public"."pricing_rules" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
-
-
-
 CREATE OR REPLACE TRIGGER "set_variants_updated_at" BEFORE UPDATE ON "public"."variants" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
 
 
 
 ALTER TABLE ONLY "public"."app_users"
     ADD CONSTRAINT "app_users_id_fkey" FOREIGN KEY ("id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
-
-
-
-ALTER TABLE ONLY "public"."brochures"
-    ADD CONSTRAINT "brochures_uploaded_by_fkey" FOREIGN KEY ("uploaded_by") REFERENCES "public"."app_users"("id") ON DELETE SET NULL;
 
 
 
@@ -471,185 +398,92 @@ ALTER TABLE ONLY "public"."messages"
 
 
 
-ALTER TABLE ONLY "public"."pricing_rules"
-    ADD CONSTRAINT "pricing_rules_variant_id_fkey" FOREIGN KEY ("variant_id") REFERENCES "public"."variants"("id") ON DELETE CASCADE;
-
-
-
-CREATE POLICY "Allow authenticated users to create campaigns" ON "public"."campaigns" FOR INSERT TO "authenticated" WITH CHECK (true);
-
-
-
-CREATE POLICY "Allow authenticated users to insert campaign recipients" ON "public"."campaign_recipients" FOR INSERT TO "authenticated" WITH CHECK (true);
-
-
-
-CREATE POLICY "Allow authenticated users to read app_users" ON "public"."app_users" FOR SELECT TO "authenticated" USING (true);
-
-
-
-CREATE POLICY "Allow authenticated users to read campaign recipients" ON "public"."campaign_recipients" FOR SELECT TO "authenticated" USING (true);
-
-
-
-CREATE POLICY "Allow authenticated users to read campaigns" ON "public"."campaigns" FOR SELECT TO "authenticated" USING (true);
-
-
-
-CREATE POLICY "Allow authenticated users to read conversations" ON "public"."conversations" FOR SELECT TO "authenticated" USING (true);
-
-
-
-CREATE POLICY "Allow authenticated users to read leads" ON "public"."leads" FOR SELECT TO "authenticated" USING (true);
-
-
-
-CREATE POLICY "Allow authenticated users to read messages" ON "public"."messages" FOR SELECT TO "authenticated" USING (true);
-
-
-
-CREATE POLICY "Allow authenticated users to update campaigns" ON "public"."campaigns" FOR UPDATE TO "authenticated" USING (true);
-
-
-
 ALTER TABLE "public"."app_users" ENABLE ROW LEVEL SECURITY;
 
 
-CREATE POLICY "auth_delete" ON "public"."app_users" FOR DELETE TO "authenticated" USING (("auth"."uid"() IS NOT NULL));
+CREATE POLICY "app_users_read_authenticated" ON "public"."app_users" FOR SELECT TO "authenticated" USING (true);
 
 
 
-CREATE POLICY "auth_delete" ON "public"."campaign_recipients" FOR DELETE TO "authenticated" USING (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_delete" ON "public"."campaign_templates" FOR DELETE TO "authenticated" USING (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_delete" ON "public"."campaigns" FOR DELETE TO "authenticated" USING (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_delete" ON "public"."variants" FOR DELETE TO "authenticated" USING (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_insert" ON "public"."app_users" FOR INSERT TO "authenticated" WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_insert" ON "public"."campaign_recipients" FOR INSERT TO "authenticated" WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_insert" ON "public"."campaign_templates" FOR INSERT TO "authenticated" WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_insert" ON "public"."campaigns" FOR INSERT TO "authenticated" WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_insert" ON "public"."conversations" FOR INSERT TO "authenticated" WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_insert" ON "public"."leads" FOR INSERT TO "authenticated" WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_insert" ON "public"."messages" FOR INSERT TO "authenticated" WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_insert" ON "public"."variants" FOR INSERT TO "authenticated" WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_select" ON "public"."app_users" FOR SELECT TO "authenticated" USING (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_select" ON "public"."campaign_recipients" FOR SELECT TO "authenticated" USING (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_select" ON "public"."campaign_templates" FOR SELECT TO "authenticated" USING (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_select" ON "public"."campaigns" FOR SELECT TO "authenticated" USING (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_select" ON "public"."conversations" FOR SELECT TO "authenticated" USING (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_select" ON "public"."leads" FOR SELECT TO "authenticated" USING (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_select" ON "public"."messages" FOR SELECT TO "authenticated" USING (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_select" ON "public"."variants" FOR SELECT TO "authenticated" USING (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_update" ON "public"."app_users" FOR UPDATE TO "authenticated" USING (("auth"."uid"() IS NOT NULL)) WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_update" ON "public"."campaign_recipients" FOR UPDATE TO "authenticated" USING (("auth"."uid"() IS NOT NULL)) WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_update" ON "public"."campaign_templates" FOR UPDATE TO "authenticated" USING (("auth"."uid"() IS NOT NULL)) WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_update" ON "public"."campaigns" FOR UPDATE TO "authenticated" USING (("auth"."uid"() IS NOT NULL)) WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_update" ON "public"."conversations" FOR UPDATE TO "authenticated" USING (("auth"."uid"() IS NOT NULL)) WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_update" ON "public"."leads" FOR UPDATE TO "authenticated" USING (("auth"."uid"() IS NOT NULL)) WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_update" ON "public"."messages" FOR UPDATE TO "authenticated" USING (("auth"."uid"() IS NOT NULL)) WITH CHECK (("auth"."uid"() IS NOT NULL));
-
-
-
-CREATE POLICY "auth_update" ON "public"."variants" FOR UPDATE TO "authenticated" USING (("auth"."uid"() IS NOT NULL)) WITH CHECK (("auth"."uid"() IS NOT NULL));
+CREATE POLICY "app_users_write_authenticated" ON "public"."app_users" TO "authenticated" USING (true) WITH CHECK (true);
 
 
 
 ALTER TABLE "public"."campaign_recipients" ENABLE ROW LEVEL SECURITY;
 
 
+CREATE POLICY "campaign_recipients_read_authenticated" ON "public"."campaign_recipients" FOR SELECT TO "authenticated" USING (true);
+
+
+
+CREATE POLICY "campaign_recipients_write_authenticated" ON "public"."campaign_recipients" TO "authenticated" USING (true) WITH CHECK (true);
+
+
+
 ALTER TABLE "public"."campaign_templates" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "campaign_templates_read_authenticated" ON "public"."campaign_templates" FOR SELECT TO "authenticated" USING (true);
+
+
+
+CREATE POLICY "campaign_templates_write_authenticated" ON "public"."campaign_templates" TO "authenticated" USING (true) WITH CHECK (true);
+
 
 
 ALTER TABLE "public"."campaigns" ENABLE ROW LEVEL SECURITY;
 
 
+CREATE POLICY "campaigns_read_authenticated" ON "public"."campaigns" FOR SELECT TO "authenticated" USING (true);
+
+
+
+CREATE POLICY "campaigns_write_authenticated" ON "public"."campaigns" TO "authenticated" USING (true) WITH CHECK (true);
+
+
+
 ALTER TABLE "public"."conversations" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "conversations_read_authenticated" ON "public"."conversations" FOR SELECT TO "authenticated" USING (true);
+
+
+
+CREATE POLICY "conversations_write_authenticated" ON "public"."conversations" TO "authenticated" USING (true) WITH CHECK (true);
+
 
 
 ALTER TABLE "public"."leads" ENABLE ROW LEVEL SECURITY;
 
 
+CREATE POLICY "leads_read_authenticated" ON "public"."leads" FOR SELECT TO "authenticated" USING (true);
+
+
+
+CREATE POLICY "leads_write_authenticated" ON "public"."leads" TO "authenticated" USING (true) WITH CHECK (true);
+
+
+
 ALTER TABLE "public"."messages" ENABLE ROW LEVEL SECURITY;
 
 
+CREATE POLICY "messages_read_authenticated" ON "public"."messages" FOR SELECT TO "authenticated" USING (true);
+
+
+
+CREATE POLICY "messages_write_authenticated" ON "public"."messages" TO "authenticated" USING (true) WITH CHECK (true);
+
+
+
 ALTER TABLE "public"."variants" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "variants_read_authenticated" ON "public"."variants" FOR SELECT TO "authenticated" USING (true);
+
+
+
+CREATE POLICY "variants_write_authenticated" ON "public"."variants" TO "authenticated" USING (true) WITH CHECK (true);
+
 
 
 REVOKE USAGE ON SCHEMA "public" FROM PUBLIC;
@@ -660,11 +494,6 @@ GRANT USAGE ON SCHEMA "public" TO "authenticated";
 
 GRANT ALL ON TABLE "public"."app_users" TO "service_role";
 GRANT ALL ON TABLE "public"."app_users" TO "authenticated";
-
-
-
-GRANT ALL ON TABLE "public"."brochures" TO "service_role";
-GRANT ALL ON TABLE "public"."brochures" TO "authenticated";
 
 
 
@@ -695,11 +524,6 @@ GRANT ALL ON TABLE "public"."leads" TO "authenticated";
 
 GRANT ALL ON TABLE "public"."messages" TO "service_role";
 GRANT ALL ON TABLE "public"."messages" TO "authenticated";
-
-
-
-GRANT ALL ON TABLE "public"."pricing_rules" TO "service_role";
-GRANT ALL ON TABLE "public"."pricing_rules" TO "authenticated";
 
 
 
