@@ -323,6 +323,28 @@ export async function createCampaignWithRecipients(input: {
 }
 
 export async function sendCampaign(campaignId: string): Promise<void> {
+  function isUnauthorizedError(error: unknown): boolean {
+    if (!error || typeof error !== "object") {
+      return false;
+    }
+
+    const maybeError = error as {
+      message?: string;
+      status?: number;
+      context?: { status?: number };
+    };
+
+    if (maybeError.status === 401) {
+      return true;
+    }
+
+    if (maybeError.context?.status === 401) {
+      return true;
+    }
+
+    return /401|unauthorized/i.test(maybeError.message ?? "");
+  }
+
   async function invokeWithToken(accessToken: string) {
     return supabase.functions.invoke("campaign-sender", {
       body: { campaign_id: campaignId },
@@ -353,7 +375,7 @@ export async function sendCampaign(campaignId: string): Promise<void> {
 
   let { error } = await invokeWithToken(accessToken);
 
-  if (error && error.message.toLowerCase().includes("401")) {
+  if (error && isUnauthorizedError(error)) {
     const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
     if (!refreshError && refreshedData.session?.access_token) {
       ({ error } = await invokeWithToken(refreshedData.session.access_token));
